@@ -1,0 +1,136 @@
+{
+  "base_url": "https://console.di.adscloud.yinwang.com/deepdata-entrypoint",
+  "verify_ssl": false,
+  "timeout_sec": 30,
+  "debug": false,
+  "topics": [
+    "camera_encoded_9",
+    "camera_encoded_10",
+    "camera_encoded_11",
+    "camera_encoded_12"
+  ],
+  "browser_headers": {
+    "Authorization": "Bearer eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICI0SVZRU0hwUXB2d1ZGYnpnR2NGZ25IdzZwNEktNy1kVnZtUHpwZFJlTzFrIn0.eyJleHAiOjE3NzQ2ODEzMTcsImlhdCI6MTc3NDU5NDkxNywiYXV0aF90aW1lIjoxNzc0MjQ2OTcwLCJqdGkiOiJkZWZmYTA5ZS1iNDBkLTRmMGYtYTc4NS1kMmNiYzUzMjNkZTIiLCJpc3MiOiJodHRwczovL3Nzby5hZHNjbG91ZC55aW53YW5nLmNvbS9rZXljbG9hay9yZWFsbXMvZGktc3R1ZGlvIiwiYXVkIjoiYWNjb3VudCIsInN1YiI6IjNlMWNhZDJhLTIzODQtNGNlZS05ZWNmLWNmNjIwMDBhZTVkZiIsInR5cCI6IkJlYXJlciIsImF6cCI6IkRhdGFDaXJjbGUiLCJub25jZSI6IjhlNzYzY2Q5LWRjNDYtNGIwYS04N2ExLTE0ZTQ3M2QxNDcxMCIsInNlc3Npb25fc3RhdGUiOiJkZGZkMjY3Ny02MTVjLTQxYzQtYWRjMy04ZTgwODNmNDJlYWYiLCJhY3IiOiIwIiwiYWxsb3dlZC1vcmlnaW5zIjpbIioiXSwicmVhbG1fYWNjZXNzIjp7InJvbGVzIjpbImRlZmF1bHQtcm9sZXMtZGktc3R1ZGlvIiwib2ZmbGluZV9hY2Nlc3MiLCJ1bWFfYXV0aG9yaXphdGlvbiJdfSwicmVzb3VyY2VfYWNjZXNzIjp7IkRhdGFDaXJjbGUiOnsicm9sZXMiOlsic2ctZHJpdmVpbnNpZ2h0OkJhc2VSb2xlIiwiZHJpdmVpbnNpZ2h0OkJhc2VSb2xlIiwiZXBpcGhhbnk6QmFzZVJvbGUiLCJzYS1kcml2ZWluc2lnaHQ6QmFzZVJvbGUiXX0sImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfX0sInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwiLCJzaWQiOiJkZGZkMjY3Ny02MTVjLTQxYzQtYWRjMy04ZTgwODNmNDJlYWYiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsIm5hbWUiOiJoMDAwMDA2NjggaDAwMDAwNjY4IiwicHJlZmVycmVkX3VzZXJuYW1lIjoiaDAwMDAwNjY4IiwiZ2l2ZW5fbmFtZSI6ImgwMDAwMDY2OCIsImZhbWlseV9uYW1lIjoiaDAwMDAwNjY4IiwiZW1haWwiOiJodWFuZ3ppYW9AeWlud2FuZy5jb20ifQ.Nhq5PGb4hkMbd1Nl_SWEYtXrsa8r6gavOVf3yBrjjvpil-4cpxQRa5W-SaD9jKun-0kkgQBC1BCHRMukREMo_kOuH1Dc1ZFbI-TxVlvMlc9HIqeZPZKCXQuWcr6jyOMC9IlLc2EfUGlmJgScL2zL_iUSi2_ck7ViJF0q-FkI7D9WOrtc1AScDgw71sOeDmu5h4R0bseVLMfYr7LwoXJK7oXoMSOVhn5sRibrTJQdx_osc6luCWpTurwYvpLna7ij4Xrd-yGcCXT7UyhV4qpQWf0va5Kbf9074Cn8BXExQ0O6Z3TfzeYRUkOGXhOQdsjNQmyGfRz3chiNTrUBS078Vg",
+    "Cookie": "_frid=52e392a2d61d4239aec7078b34485e57; fingerprintsId=8832dd0d-a702-4dae-be89-2f41ae3fb8e2; _w3Fid=34380; idss_cid=8832dd0d-a702-4dae-be89-2f41ae3fb8e2; diLanguage=zh; lang=zh_CN; u_depart=%E7%A0%94%E5%8F%91%E7%AE%A1%E7%90%86%E9%83%A8%2F%E6%99%BA%E8%83%BD%E9%A9%BE%E9%A9%B6%E4%BA%A7%E5%93%81%E9%83%A8%2FADS%E9%9B%86%E6%88%90%E4%B8%8E%E9%AA%8C%E8%AF%81%E9%83%A8; vision_user_name=h00000668; vision_user_id=1005370; HWWAFSESTIME=1774259578536; HWWAFSESID=ddfeed01fb9cac80fc; drive_insight_sessionid=igimlmbgjo5eskn69t8avo513s; needLogin=true; user-group=default; authmethod=3130313016197B5E02D529396889737FE475E04122A5C7AF7C88A646FD7C8AF5CF8FE67C26E6; refresh_token=6898bda1be3ce051959d559c1f04094f68f2601c4ea9d6bb5ac4774b33dd568b24f169959c3036115f930591c1faed2f4a555186c3814b39977f913376ad9435; _fr_ssid=3b0e9cef0580493983fa5cef9502fda7; prod_J_SESSION_ID=ede4f12959f06b92a20ead622135b80226a63c1491d565cb",
+    "Deepdata-project": "driveinsight",
+    "Deepdata-region": "RaD-prod",
+    "Entrypoint-version": "v2",
+    "userId": "34380",
+    "userName": "h00000668",
+    "ProjectId": "1"
+  },
+  "excel": {
+    "path": "data.xlsx",
+    "sheet": "Sheet1",
+    "header": 0,
+    "link_column": "C",
+    "checker_column": "T",
+    "start_row": 2,
+    "rows": [2,3]
+  },
+  "output": {
+    "root_dir": "outputs"
+  },
+  "sampling": {
+    "before_frames": 4,
+    "after_frames": 5
+  },
+  "decoder": {
+    "ffmpeg_path": "ffmpeg",
+    "image_ext": "png",
+    "context_before_packets": 12,
+    "context_after_packets": 0,
+    "loglevel": "error"
+  },
+  "match": {
+    "topic_keywords": [
+      "camera",
+      "encoded",
+      "h265",
+      "fisheye"
+    ],
+    "payload_fields": [
+      "data",
+      "raw_data",
+      "payload"
+    ]
+  },
+  "pipeline": {
+    "max_concurrency": 3
+  },
+  "cleanup": {
+    "delete_bags_after_row": true,
+    "delete_only_if_all_tasks_succeeded": true
+  },
+  "ai": {
+    "enabled": true,
+    "api": {
+      "base_url": "https://ai-agent-service.rnd.yinwang.com/v1",
+      "api_key": "app-TtJ9kxiZYrzcd1sg6Id9NvHU",
+      "user_id": "driveinsight_user",
+      "response_mode": "streaming"
+    },
+    "input": {
+      "query_template": "根据输入的车辆多鱼眼图片，分析case碰撞情况。"
+    },
+    "image_selection": {
+      "mode": "sample_sequence_per_camera",
+      "trim_to_max_length": false
+    },
+    "runtime": {
+      "connect_timeout_sec": 30,
+      "read_timeout_sec": 600,
+      "write_timeout_sec": 120,
+      "pool_timeout_sec": 60,
+      "upload_delay_sec": 0.0,
+      "save_parameters_once": false,
+      "save_raw_events_ndjson": true,
+      "keep_raw_events_in_memory": false,
+      "keep_text_chunks_in_memory": false
+    },
+    "output": {
+      "final_output_selector": [
+        "output"
+      ]
+    },
+    "workflow_contract": {
+      "structured_fields": [
+        {
+          "name": "collision_pred",
+          "type": "string",
+          "required": true,
+          "enum": [
+            "是",
+            "否",
+            "疑似"
+          ]
+        },
+        {
+          "name": "nearest_obstacle_distance_cm",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "summary",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "key_image",
+          "type": "string",
+          "required": false
+        }
+      ]
+    },
+    "normalization": {
+      "collision_field": "collision_pred",
+      "distance_field": "nearest_obstacle_distance_cm",
+      "summary_field": "summary",
+      "key_image_field": "key_image",
+      "distance_unit": "cm",
+      "key_image_empty_values": [
+        ""
+      ]
+    }
+  }
+}
