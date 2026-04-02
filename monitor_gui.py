@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
-import time
 from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, Button, Frame, Label, StringVar, Text, Tk
 
@@ -120,8 +119,8 @@ class MonitorApp:
             cwd=str(ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+            text=False,
+            bufsize=0,
         )
         self.proc = proc
         self.status_text.set(f"运行中（{mode}）")
@@ -135,11 +134,22 @@ class MonitorApp:
         self._append_log("[INFO] 已发送终止信号。")
 
     def _drain_output(self, proc: subprocess.Popen, mode: str) -> None:
-        for line in proc.stdout or []:
-            self.root.after(0, self._append_log, line.rstrip("\n"))
+        if proc.stdout is not None:
+            for raw_line in iter(proc.stdout.readline, b""):
+                line = self._decode_output_line(raw_line)
+                self.root.after(0, self._append_log, line.rstrip("\n"))
         code = proc.wait()
         if self.proc is proc:
             self.root.after(0, self.status_text.set, f"已结束（{mode}, exit={code}）")
+
+    @staticmethod
+    def _decode_output_line(raw_line: bytes) -> str:
+        for enc in ("utf-8", "gbk"):
+            try:
+                return raw_line.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return raw_line.decode("utf-8", errors="replace")
 
     def _refresh_loop(self) -> None:
         stats = collect_task_stats(self.output_root)
