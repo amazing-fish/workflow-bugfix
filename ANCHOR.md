@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.1.1`
+- 当前版本：`v0.2.2`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -21,6 +21,22 @@
    - 聚合摘要仅保留决策与状态字段 + 明细路径。
 
 ## 修改日志（稳定）
+- `v0.2.2` `bugfix`（2026-04-02）
+  - 修复 `monitor_gui.py` Windows 控制台编码导致的日志线程崩溃问题：
+    - 子进程输出改为二进制读取并做多编码解码（`utf-8` -> `gbk` -> `replace` 回退），避免 `UnicodeDecodeError` 中断监控线程。
+- `v0.2.1` `bugfix`（2026-04-02）
+  - 修复 `workflow.py` 仅 AI 重跑时的陈旧错误字段问题：
+    - `run_ai_for_all_rows()` 在任务 AI 成功后会清理旧 `error` 字段，避免成功任务遗留历史失败信息。
+  - 修复 `monitor_gui.py` 日志线程绑定问题：
+    - 输出读取线程改为绑定固定 `Popen` 句柄，避免快速重启任务时线程误关联到新进程并更新错误状态。
+- `v0.2.0` `feature`（2026-04-02）
+  - 新增本地可视化监控面板 `monitor_gui.py`：
+    - 支持展示任务总量、完成/失败/待处理统计。
+    - 支持展示线程情况（`max_concurrency`、workflow 子进程、monitor 线程数）。
+    - 新增四类启动按钮：全流程、仅下载 bag、解码图片（删除 bag）、直接调用 AI。
+  - 扩展 `workflow.py` 启动模式：
+    - 新增 `--ai-only`，支持对已解码产物直接执行 AI。
+    - 新增 `--force-delete-bags`，可覆盖配置强制清理 bag。
 - `v0.1.1` `refactor`（2026-04-01）
   - 重构 summary 分层职责：
     - `workflow_summary.json` 不再内嵌全量 row 详情，仅保留 row 级统计 + 路径。
