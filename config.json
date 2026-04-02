@@ -64,6 +64,9 @@
   },
   "ai": {
     "enabled": true,
+    "cleanup": {
+      "delete_no_prediction_samples": true
+    },
     "api": {
       "base_url": "https://ai-agent-service.rnd.yinwang.com/v1",
       "api_key": "app-TtJ9kxiZYrzcd1sg6Id9NvHU",
