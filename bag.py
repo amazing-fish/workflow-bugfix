@@ -41,7 +41,6 @@ class DIBagDownloader:
         self.verify_ssl = self.cfg.get("verify_ssl", False)
         self.timeout_sec = int(self.cfg.get("timeout_sec", 30))
         self.download_retry_times = int(self.cfg.get("download_retry_times", 2))
-        self.download_retry_backoff_sec = float(self.cfg.get("download_retry_backoff_sec", 1.0))
         self.debug = bool(self.cfg.get("debug", False))
         self.topics = list(self.cfg.get("topics", []))
 
@@ -471,13 +470,14 @@ class DIBagDownloader:
                 else:
                     self._validate_bag_magic(content, save_name=save_name, source="raw_response")
                     save_path.write_bytes(content)
+                time.sleep(1.0)
                 return save_path
             except Exception as e:
                 last_error = e
                 can_retry = self._is_retriable_download_error(e)
                 if attempt >= max_attempts or not can_retry:
                     break
-                sleep_sec = self.download_retry_backoff_sec * attempt
+                sleep_sec = float(2 ** attempt)
                 print(
                     f"[WARN] {save_name} 下载异常，第 {attempt}/{max_attempts} 次失败，"
                     f"{sleep_sec:.1f}s 后重试: {e}"
