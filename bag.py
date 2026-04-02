@@ -5,6 +5,7 @@ import io
 import json
 import re
 import sys
+import time
 import zipfile
 from pathlib import Path
 from typing import Any, Iterator
@@ -39,6 +40,7 @@ class DIBagDownloader:
         self.base_url = self.cfg["base_url"].rstrip("/")
         self.verify_ssl = self.cfg.get("verify_ssl", False)
         self.timeout_sec = int(self.cfg.get("timeout_sec", 30))
+        self.download_retry_times = int(self.cfg.get("download_retry_times", 2))
         self.debug = bool(self.cfg.get("debug", False))
         self.topics = list(self.cfg.get("topics", []))
 
@@ -449,23 +451,82 @@ class DIBagDownloader:
         save_path = save_dir / save_name
         url = obs_download_url + "/obs/v1/files/download?opid=" + obs_id
         headers = self._headers_for("rivulet")
-        resp = self.session.get(url, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        content = resp.content
-        if self._looks_like_zip(content):
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                bag_members = [n for n in zf.namelist() if n.endswith(".bag")]
-                if not bag_members:
-                    raise RuntimeError(f"download 返回 zip，但未找到 .bag: {save_name}")
-                extracted = zf.read(bag_members[0])
-                save_path.write_bytes(extracted)
-        else:
-            save_path.write_bytes(content)
-        return save_path
+        last_error: Exception | None = None
+        max_attempts = max(1, self.download_retry_times + 1)
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = self.session.get(url, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+                resp.raise_for_status()
+                content = resp.content
+                if self._looks_like_zip(content):
+                    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                        bag_members = [n for n in zf.namelist() if n.endswith(".bag")]
+                        if not bag_members:
+                            raise RuntimeError(f"download 返回 zip，但未找到 .bag: {save_name}")
+                        extracted = zf.read(bag_members[0])
+                        self._validate_bag_magic(extracted, save_name=save_name, source=f"zip_member:{bag_members[0]}")
+                        save_path.write_bytes(extracted)
+                else:
+                    self._validate_bag_magic(content, save_name=save_name, source="raw_response")
+                    save_path.write_bytes(content)
+                time.sleep(1.0)
+                return save_path
+            except Exception as e:
+                last_error = e
+                can_retry = self._is_retriable_download_error(e)
+                if attempt >= max_attempts or not can_retry:
+                    break
+                sleep_sec = float(2 ** attempt)
+                print(
+                    f"[WARN] {save_name} 下载异常，第 {attempt}/{max_attempts} 次失败，"
+                    f"{sleep_sec:.1f}s 后重试: {e}"
+                )
+                time.sleep(sleep_sec)
+
+        assert last_error is not None
+        raise RuntimeError(f"{save_name} 下载失败（已重试 {max_attempts - 1} 次）: {last_error}") from last_error
 
     @staticmethod
     def _looks_like_zip(content: bytes) -> bool:
-        return len(content) >= 4 and content[:4] == b"PK\x03\x04"
+        if len(content) < 4:
+            return False
+        zip_magic_set = {
+            b"PK\x03\x04",  # local file header
+            b"PK\x05\x06",  # end of central directory (可能是空 zip)
+            b"PK\x07\x08",  # spanned/split zip
+        }
+        if content[:4] in zip_magic_set:
+            return True
+        return zipfile.is_zipfile(io.BytesIO(content))
+
+    @staticmethod
+    def _validate_bag_magic(content: bytes, save_name: str, source: str) -> None:
+        if content.startswith(b"#ROSBAG"):
+            return
+        prefix = content[:64]
+        prefix_text = prefix.decode("utf-8", errors="replace").replace("\n", "\\n").replace("\r", "\\r")
+        raise RuntimeError(
+            f"{save_name} 文件头校验失败: File magic is invalid. source={source}, "
+            f"size={len(content)}, prefix_hex={prefix.hex()}, prefix_text={prefix_text}"
+        )
+
+    @staticmethod
+    def _is_retriable_download_error(exc: Exception) -> bool:
+        cur: BaseException | None = exc
+        while cur is not None:
+            if isinstance(cur, (requests.Timeout, requests.ConnectionError, zipfile.BadZipFile)):
+                return True
+            cur = cur.__cause__ or cur.__context__
+
+        msg = str(exc)
+        retriable_hints = [
+            "download 返回 zip，但未找到 .bag",
+            "Read timed out",
+            "Connection aborted",
+            "Remote end closed connection",
+        ]
+        return any(hint in msg for hint in retriable_hints)
 
     # ---------------- path / headers ----------------
 

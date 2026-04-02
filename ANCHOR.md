@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.2.7`
+- 当前版本：`v0.2.12`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -21,6 +21,31 @@
    - 聚合摘要仅保留决策与状态字段 + 明细路径。
 
 ## 修改日志（稳定）
+- `v0.2.12` `bugfix`（2026-04-02）
+  - 调整 `bag.py` 下载节奏控制策略：
+    - 单个 bag 下载并校验成功后固定额外等待 `1s`，降低连续请求抖动风险。
+    - 第一次失败重试前固定等待 `2s`，第二次失败重试前固定等待 `4s`（指数退避）。
+    - 该等待策略优先于旧的可配置退避秒数约定，确保行为与运维预期一致。
+- `v0.2.11` `bugfix`（2026-04-02）
+  - 修复 `bag.py` 下载重试判定过度依赖错误文案的问题：
+    - `_is_retriable_download_error` 改为异常类型优先判定，直接识别 `zipfile.BadZipFile`、`requests.Timeout`、`requests.ConnectionError`。
+    - 支持沿 `__cause__ / __context__` 遍历异常链，避免包装异常导致漏判。
+    - 保留关键字匹配作为兜底，仅用于少数业务错误文案（如“zip 内无 .bag”）。
+- `v0.2.10` `bugfix`（2026-04-02）
+  - 修复 `bag.py` 下载阶段“zip 内无 bag”易瞬时失败的问题：
+    - 在 `_download_by_obs_id` 增加重试机制（默认重试 2 次，共最多 3 次尝试）。
+    - 对 `download 返回 zip，但未找到 .bag`、`BadZipFile`、超时/连接中断等异常执行指数退避重试（`backoff = 基础秒数 * attempt`）。
+    - 重试耗尽后抛出聚合异常，明确标注“已重试 N 次”与最后一次错误原因，便于排障。
+    - 新增可配置项：`download_retry_times`、`download_retry_backoff_sec`（缺省分别为 2 和 1.0）。
+- `v0.2.9` `bugfix`（2026-04-02）
+  - 修复 `bag.py` 的 zip 识别边界问题：
+    - 兼容识别 `PK\x05\x06`（空 zip）与 `PK\x07\x08` 等 zip 文件头，避免被误判为原始响应直存分支。
+    - 对非典型头但结构合法的 zip，回退使用 `zipfile.is_zipfile` 识别，统一进入 zip 解包逻辑。
+    - 当 zip 中无 `.bag` 成员时，将明确抛出“zip 内无 bag”异常，避免误报 `File magic is invalid` 干扰定位。
+- `v0.2.8` `bugfix`（2026-04-02）
+  - 修复 `bag.py` 的 bag 下载校验缺失问题：
+    - 对“原始响应直存 bag”与“zip 解包提取 bag”两种下载路径统一新增文件头校验（`#ROSBAG`）。
+    - 当下载结果不是合法 bag 时立即抛出异常，并输出 `source/size/prefix_hex/prefix_text` 诊断信息，避免延迟到解码阶段才报 `File magic is invalid`。
 - `v0.2.7` `bugfix`（2026-04-02）
   - 修复 `workflow.py` 的 `--ai-only` 执行模型：
     - 由串行逐 row/逐 task 执行改为任务级线程池并发执行。
