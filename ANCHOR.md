@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.2.10`
+- 当前版本：`v0.2.11`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -21,6 +21,11 @@
    - 聚合摘要仅保留决策与状态字段 + 明细路径。
 
 ## 修改日志（稳定）
+- `v0.2.11` `bugfix`（2026-04-02）
+  - 修复 `bag.py` 下载重试判定过度依赖错误文案的问题：
+    - `_is_retriable_download_error` 改为异常类型优先判定，直接识别 `zipfile.BadZipFile`、`requests.Timeout`、`requests.ConnectionError`。
+    - 支持沿 `__cause__ / __context__` 遍历异常链，避免包装异常导致漏判。
+    - 保留关键字匹配作为兜底，仅用于少数业务错误文案（如“zip 内无 .bag”）。
 - `v0.2.10` `bugfix`（2026-04-02）
   - 修复 `bag.py` 下载阶段“zip 内无 bag”易瞬时失败的问题：
     - 在 `_download_by_obs_id` 增加重试机制（默认重试 2 次，共最多 3 次尝试）。

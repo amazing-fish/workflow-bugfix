@@ -513,11 +513,15 @@ class DIBagDownloader:
 
     @staticmethod
     def _is_retriable_download_error(exc: Exception) -> bool:
+        cur: BaseException | None = exc
+        while cur is not None:
+            if isinstance(cur, (requests.Timeout, requests.ConnectionError, zipfile.BadZipFile)):
+                return True
+            cur = cur.__cause__ or cur.__context__
+
         msg = str(exc)
         retriable_hints = [
             "download 返回 zip，但未找到 .bag",
-            "File is not a zip file",
-            "BadZipFile",
             "Read timed out",
             "Connection aborted",
             "Remote end closed connection",
