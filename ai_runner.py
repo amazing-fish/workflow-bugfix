@@ -45,6 +45,14 @@ def save_json(obj: Any, path: Path) -> None:
     path.write_text(pretty(obj), encoding="utf-8")
 
 
+def is_none_like_output(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() == "none"
+    return False
+
+
 def guess_mime_type(path: Path) -> str:
     return (
         mimetypes.guess_type(path.name)[0]
@@ -322,23 +330,38 @@ class WorkflowAIProcessor:
                     save_json(uploaded_files, ai_dir / "uploaded_files.json")
                     save_json(payload, ai_dir / "workflow_payload.json")
 
-                    stream_result = self._run_workflow_streaming(client, payload, ai_dir)
-                    schema_report = validate_final_schema(self.ai_cfg, stream_result.get("final_structured_output"))
-                    normalized = normalize_final_output(self.ai_cfg, stream_result.get("final_structured_output"))
+                    max_retry = 3
+                    stream_result: dict[str, Any] | None = None
+                    schema_report: dict[str, Any] | None = None
+                    normalized: dict[str, Any] | None = None
+                    collision_pred = None
+                    retry_count = 0
+
+                    for _ in range(max_retry + 1):
+                        stream_result = self._run_workflow_streaming(client, payload, ai_dir)
+                        schema_report = validate_final_schema(self.ai_cfg, stream_result.get("final_structured_output"))
+                        normalized = normalize_final_output(self.ai_cfg, stream_result.get("final_structured_output"))
+                        collision_pred = normalized.get("collision_pred") if isinstance(normalized, dict) else None
+
+                        if not is_none_like_output(collision_pred):
+                            break
+                        retry_count += 1
+                        if retry_count <= max_retry:
+                            log_warn(
+                                f"{row_meta.get('row_id')}/{task_meta.get('task_id')}/{sample_name} "
+                                f"输出为 None，触发重试 {retry_count}/{max_retry}"
+                            )
 
                     save_json(stream_result, ai_dir / "workflow_stream_result.json")
                     save_json(schema_report, ai_dir / "workflow_final_schema_report.json")
                     save_json(normalized, ai_dir / "workflow_final_normalized.json")
-
-                    collision_pred = None
-                    if isinstance(normalized, dict):
-                        collision_pred = normalized.get("collision_pred")
 
                     sample_result = {
                         "sample_index": sample_index,
                         "sample_name": sample_name,
                         "status": "ok" if schema_report.get("ok") else "schema_invalid",
                         "collision_pred": collision_pred,
+                        "none_retry_count": retry_count,
                         "selected_count": len(images),
                         "schema_ok": schema_report.get("ok"),
                         "nearest_obstacle_distance_m": (normalized or {}).get("nearest_obstacle_distance_m"),
