@@ -143,53 +143,56 @@ class RowWorkflow:
         self.ai_processor.prepare()
 
         row_summaries: list[dict[str, Any]] = []
-        for row_dir in row_dirs:
-            row_meta = self._load_json(row_dir / "row_meta.json")
-            row_id = row_meta.get("row_id") or row_dir.name
-            task_results: list[dict[str, Any]] = []
-            for task in row_meta.get("tasks", []):
-                task_id = task.get("task_id")
-                if not task_id:
-                    continue
-                task_dir = row_dir / task_id
-                task_meta_path = task_dir / "task_meta.json"
-                if not task_meta_path.exists():
-                    task_results.append({
-                        "task_id": task_id,
-                        "target_ts": task.get("target_ts"),
-                        "status": "failed",
-                        "error": f"missing task_meta: {task_meta_path}",
-                        "task_dir": str(task_dir),
-                    })
-                    continue
-                task_meta = self._load_json(task_meta_path)
-                if not (task_dir / "manifest.json").exists():
-                    task_meta.update({
-                        "status": "failed",
-                        "error": f"missing manifest: {task_dir / 'manifest.json'}",
-                    })
-                    task_results.append(task_meta)
-                    self._write_task_result_to_disk(row_dir, task_meta)
-                    continue
-                print(f"[INFO] {row_id}/{task_id} 直接执行 AI")
+        futures: dict[Any, tuple[str, dict[str, Any], dict[str, Any]]] = {}
+        row_states: dict[str, dict[str, Any]] = {}
+
+        with ThreadPoolExecutor(max_workers=self.max_concurrency, thread_name_prefix="ai-only-task") as executor:
+            for row_dir in row_dirs:
+                row_meta = self._load_json(row_dir / "row_meta.json")
+                row_id = row_meta.get("row_id") or row_dir.name
+                tasks = list(row_meta.get("tasks") or [])
+                row_states[row_id] = {
+                    "row_dir": row_dir,
+                    "row_meta": row_meta,
+                    "results": [],
+                    "pending": 0,
+                }
+                for task in tasks:
+                    task_id = task.get("task_id")
+                    if not task_id:
+                        continue
+                    future = executor.submit(self._run_ai_only_task_worker, row_meta, task)
+                    futures[future] = (row_id, row_meta, task)
+                    row_states[row_id]["pending"] += 1
+                if row_states[row_id]["pending"] == 0:
+                    summary = self._finalize_row(row_dir, row_meta, [])
+                    row_summaries.append(self._build_workflow_row_summary(summary, row_dir))
+
+            for future in as_completed(list(futures.keys())):
+                row_id, row_meta, task = futures[future]
+                row_state = row_states[row_id]
+                row_dir = row_state["row_dir"]
                 try:
-                    ai_result = self.ai_processor.run_for_task_sequence(
-                        row_meta=row_meta,
-                        task_meta=task_meta,
-                        task_dir=task_dir,
-                    )
-                    task_meta["ai"] = ai_result
-                    task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
-                    task_meta.pop("error", None)
+                    result = future.result()
                 except Exception as e:
-                    task_meta["status"] = "failed"
-                    task_meta["error"] = str(e)
-                task_results.append(task_meta)
-                self._write_task_result_to_disk(row_dir, task_meta)
+                    result = {
+                        "task_id": task.get("task_id"),
+                        "target_ts": task.get("target_ts"),
+                        "status": "worker_failed",
+                        "error": str(e),
+                        "task_dir": str(row_dir / str(task.get("task_id"))),
+                    }
+                row_state["results"].append(result)
+                row_state["pending"] -= 1
+                self._write_task_result_to_disk(row_dir, result)
+                print(f"[INFO] {row_id}/{result.get('task_id')} AI-only 完成，剩余 pending={row_state['pending']}")
 
-            row_summary = self._finalize_row(row_dir, row_meta, task_results)
-            row_summaries.append(self._build_workflow_row_summary(row_summary, row_dir))
+                if row_state["pending"] == 0:
+                    summary = self._finalize_row(row_dir, row_meta, row_state["results"])
+                    row_summaries.append(self._build_workflow_row_summary(summary, row_dir))
+                    print(f"[INFO] {row_id} AI-only 全部 task 完成")
 
+        row_summaries.sort(key=lambda x: str(x.get("row_dir", "")))
         summary = {
             "output_root": str(self.output_root),
             "total_rows": len(row_summaries),
@@ -322,6 +325,54 @@ class RowWorkflow:
             task_meta["error"] = str(e)
             print(f"[ERROR] {row_meta['row_id']}/{task_id} 失败: {e}")
 
+        return task_meta
+
+    def _run_ai_only_task_worker(self, row_meta: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+        task_id = task.get("task_id")
+        row_dir = self.output_root / row_meta["row_id"]
+        task_dir = row_dir / str(task_id)
+        task_meta_path = task_dir / "task_meta.json"
+
+        if not task_id:
+            return {
+                "task_id": None,
+                "target_ts": task.get("target_ts"),
+                "status": "failed",
+                "error": "missing task_id",
+                "task_dir": str(task_dir),
+            }
+        if not task_meta_path.exists():
+            return {
+                "task_id": task_id,
+                "target_ts": task.get("target_ts"),
+                "status": "failed",
+                "error": f"missing task_meta: {task_meta_path}",
+                "task_dir": str(task_dir),
+            }
+
+        task_meta = self._load_json(task_meta_path)
+        manifest_path = task_dir / "manifest.json"
+        if not manifest_path.exists():
+            task_meta.update({
+                "status": "failed",
+                "error": f"missing manifest: {manifest_path}",
+            })
+            return task_meta
+
+        row_id = row_meta.get("row_id") or row_dir.name
+        print(f"[INFO] {row_id}/{task_id} 直接执行 AI")
+        try:
+            ai_result = self.ai_processor.run_for_task_sequence(
+                row_meta=row_meta,
+                task_meta=task_meta,
+                task_dir=task_dir,
+            )
+            task_meta["ai"] = ai_result
+            task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
+            task_meta.pop("error", None)
+        except Exception as e:
+            task_meta["status"] = "failed"
+            task_meta["error"] = str(e)
         return task_meta
 
     # ---------------- helpers ----------------

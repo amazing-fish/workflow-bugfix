@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.2.6`
+- 当前版本：`v0.2.7`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -21,6 +21,13 @@
    - 聚合摘要仅保留决策与状态字段 + 明细路径。
 
 ## 修改日志（稳定）
+- `v0.2.7` `bugfix`（2026-04-02）
+  - 修复 `workflow.py` 的 `--ai-only` 执行模型：
+    - 由串行逐 row/逐 task 执行改为任务级线程池并发执行。
+    - 并发上限与全流程一致，统一使用 `pipeline.max_concurrency` 控制。
+    - 每个 task 完成后立即落盘 `task_meta.json`，并在 row 级 `pending=0` 时收敛 `row_summary.json`。
+  - 稳定性优化：
+    - `workflow_summary.json` 的 row 列表按 `row_dir` 排序，避免并发导致输出顺序抖动。
 - `v0.2.6` `bugfix`（2026-04-02）
   - 修复 `workflow.py` 的仅解码全量模式初始化行为：
     - `run_decode_for_all_rows()` 不再调用 `ai_processor.prepare()`，避免 `--decode-only` 仍依赖 AI `/parameters` 接口可用性。
