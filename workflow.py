@@ -91,7 +91,7 @@ class RowWorkflow:
                 }
                 if not tasks:
                     summary = self._finalize_row(row_dir, row_meta, [])
-                    all_rows_summary.append({"row_dir": str(row_dir), "status": summary["status"], "summary": summary})
+                    all_rows_summary.append(self._build_workflow_row_summary(summary, row_dir))
                     continue
                 for task in tasks:
                     future = executor.submit(self._process_task_worker, row_meta, task)
@@ -116,11 +116,17 @@ class RowWorkflow:
                 print(f"[INFO] {row_id}/{result.get('task_id')} 完成，剩余 pending={row_state['pending']}")
                 if row_state["pending"] == 0:
                     summary = self._finalize_row(row_dir, row_state["row_meta"], row_state["results"])
-                    all_rows_summary.append({"row_dir": str(row_dir), "status": summary["status"], "summary": summary})
+                    all_rows_summary.append(self._build_workflow_row_summary(summary, row_dir))
                     print(f"[INFO] {row_id} 全部 task 完成")
 
         all_rows_summary.sort(key=lambda x: str(x.get("row_dir", "")))
-        summary = {"output_root": str(self.output_root), "rows": all_rows_summary}
+        summary = {
+            "output_root": str(self.output_root),
+            "total_rows": len(all_rows_summary),
+            "completed_rows": sum(1 for row in all_rows_summary if row.get("status") == "completed"),
+            "failed_rows": sum(1 for row in all_rows_summary if row.get("status") != "completed"),
+            "rows": all_rows_summary,
+        }
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
 
@@ -153,7 +159,7 @@ class RowWorkflow:
 
                 if not tasks:
                     summary = self._finalize_row(row_dir, row_meta, [])
-                    all_rows_summary.append({"row_dir": str(row_dir), "status": summary["status"], "summary": summary})
+                    all_rows_summary.append(self._build_workflow_row_summary(summary, row_dir))
                     continue
 
                 print(f"[INFO] {row_id} 下载完成，提交 {len(tasks)} 个 task 到线程池")
@@ -181,11 +187,17 @@ class RowWorkflow:
 
                 if row_state["pending"] == 0:
                     summary = self._finalize_row(row_dir, row_state["row_meta"], row_state["results"])
-                    all_rows_summary.append({"row_dir": str(row_dir), "status": summary["status"], "summary": summary})
+                    all_rows_summary.append(self._build_workflow_row_summary(summary, row_dir))
                     print(f"[INFO] {row_id} 全部 task 完成")
 
         all_rows_summary.sort(key=lambda x: str(x.get("row_dir", "")))
-        summary = {"output_root": str(self.output_root), "rows": all_rows_summary}
+        summary = {
+            "output_root": str(self.output_root),
+            "total_rows": len(all_rows_summary),
+            "completed_rows": sum(1 for row in all_rows_summary if row.get("status") == "completed"),
+            "failed_rows": sum(1 for row in all_rows_summary if row.get("status") != "completed"),
+            "rows": all_rows_summary,
+        }
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
 
@@ -323,7 +335,7 @@ class RowWorkflow:
             "total_tasks": total_tasks,
             "ok_tasks": ok_tasks,
             "failed_tasks": failed_tasks,
-            "results": sorted(results, key=lambda x: str(x.get("task_id", ""))),
+            "task_summaries": self._build_row_task_summaries(results),
         }
 
         cleanup_result = self._cleanup_bags_if_needed(row_dir, row_meta, row_summary)
@@ -336,6 +348,35 @@ class RowWorkflow:
         self._save_json(row_dir / "row_summary.json", row_summary)
         self._save_json(row_dir / "row_meta.json", row_meta)
         return row_summary
+
+    @staticmethod
+    def _build_row_task_summaries(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        summaries = []
+        for item in sorted(results, key=lambda x: str(x.get("task_id", ""))):
+            task_id = item.get("task_id")
+            task_dir = item.get("task_dir")
+            summaries.append({
+                "task_id": task_id,
+                "target_ts": item.get("target_ts"),
+                "status": item.get("status"),
+                "ai_status": (item.get("ai") or {}).get("status") if isinstance(item.get("ai"), dict) else None,
+                "error": item.get("error"),
+                "task_summary_path": str(Path(task_dir) / "task_meta.json") if task_dir else None,
+            })
+        return summaries
+
+    @staticmethod
+    def _build_workflow_row_summary(row_summary: dict[str, Any], row_dir: Path) -> dict[str, Any]:
+        return {
+            "row_id": row_summary.get("row_id") or row_dir.name,
+            "row_dir": str(row_dir),
+            "status": row_summary.get("status"),
+            "total_tasks": row_summary.get("total_tasks"),
+            "ok_tasks": row_summary.get("ok_tasks"),
+            "failed_tasks": row_summary.get("failed_tasks"),
+            "row_summary_path": str(row_dir / "row_summary.json"),
+            "cleanup": row_summary.get("cleanup"),
+        }
 
     def _cleanup_bags_if_needed(self, row_dir: Path, row_meta: dict[str, Any], row_summary: dict[str, Any]) -> dict[str, Any] | None:
         enabled = bool(self.cleanup_cfg.get("delete_bags_after_row", False))

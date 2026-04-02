@@ -338,19 +338,19 @@ class WorkflowAIProcessor:
                         "sample_index": sample_index,
                         "sample_name": sample_name,
                         "status": "ok" if schema_report.get("ok") else "schema_invalid",
-                        "selected_images": [str(p) for p in images],
-                        "selected_count": len(images),
-                        "workflow_run_id": stream_result.get("workflow_run_id"),
-                        "task_id": stream_result.get("task_id"),
-                        "workflow_id": stream_result.get("workflow_id"),
-                        "workflow_status": stream_result.get("status"),
-                        "total_tokens": stream_result.get("total_tokens"),
-                        "total_steps": stream_result.get("total_steps"),
-                        "result_dir": str(ai_dir),
-                        "final_structured_output": stream_result.get("final_structured_output"),
-                        "schema_report": schema_report,
-                        "normalized": normalized,
                         "collision_pred": collision_pred,
+                        "selected_count": len(images),
+                        "schema_ok": schema_report.get("ok"),
+                        "nearest_obstacle_distance_m": (normalized or {}).get("nearest_obstacle_distance_m"),
+                        "summary": (normalized or {}).get("summary"),
+                        "detail_paths": {
+                            "selected_images": str(ai_dir / "selected_images.json"),
+                            "uploaded_files": str(ai_dir / "uploaded_files.json"),
+                            "workflow_payload": str(ai_dir / "workflow_payload.json"),
+                            "workflow_stream_result": str(ai_dir / "workflow_stream_result.json"),
+                            "schema_report": str(ai_dir / "workflow_final_schema_report.json"),
+                            "normalized": str(ai_dir / "workflow_final_normalized.json"),
+                        },
                     }
                     save_json(sample_result, ai_dir / "sample_result_summary.json")
                     sequence_results.append(sample_result)
@@ -375,6 +375,7 @@ class WorkflowAIProcessor:
             "sequence_results": sequence_results,
             "aggregate": aggregate,
             "result_dir": str(task_dir),
+            "detail_note": "sample级详情请查看每个 sample*/ai 目录下的明细文件",
         }
         save_json(result, task_dir / "ai_result_summary.json")
         return result
