@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.2.2`
+- 当前版本：`v0.2.4`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -21,6 +21,15 @@
    - 聚合摘要仅保留决策与状态字段 + 明细路径。
 
 ## 修改日志（稳定）
+- `v0.2.4` `bugfix`（2026-04-02）
+  - 修复 `ai_runner.py` 中 `none_retry_count` 统计偏大的问题：
+    - 当最终一次尝试仍为 `None` 且已无后续重试机会时，不再累计重试次数。
+    - `none_retry_count` 仅统计真实发生的重试次数（最大为 3），避免监控统计误判。
+- `v0.2.3` `bugfix`（2026-04-02）
+  - 修复 `ai_runner.py` 在 sample 级输出为 `None` 时缺少重试的问题：
+    - 新增 `None` 输出判定逻辑（兼容 `None` 与字符串 `"None"`）。
+    - 当 `collision_pred` 为 `None` 时自动重试该 case，最多重试 3 次。
+    - 在 `sample_result_summary.json` 增加 `none_retry_count` 字段，记录实际重试次数，便于排障与统计。
 - `v0.2.2` `bugfix`（2026-04-02）
   - 修复 `monitor_gui.py` Windows 控制台编码导致的日志线程崩溃问题：
     - 子进程输出改为二进制读取并做多编码解码（`utf-8` -> `gbk` -> `replace` 回退），避免 `UnicodeDecodeError` 中断监控线程。
