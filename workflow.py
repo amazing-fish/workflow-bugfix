@@ -19,7 +19,7 @@ class RowWorkflow:
     默认全流程：
     1. 主线程顺序下载每个 row 的 bag。
     2. 某个 row 下载完成后，立即把该 row 的 task 提交到全局线程池。
-    3. 每个 task 内部顺序执行：解码 -> sample01..sample10 逐帧 AI。
+    3. 每个 task 内部顺序执行：解码 ->（可选）sample01..sample10 逐帧 AI。
     4. 全局 task 并发上限由 pipeline.max_concurrency 控制。
     5. 某个 row 全部 task 完成后，再根据配置删除该 row 的 bag。
     """
@@ -57,7 +57,7 @@ class RowWorkflow:
         row_meta = self._load_json(row_dir / "row_meta.json")
         results = []
         for task in row_meta.get("tasks", []):
-            result = self._process_task_worker(row_meta, task)
+            result = self._process_task_worker(row_meta, task, run_ai=False)
             results.append(result)
             self._write_task_result_to_disk(row_dir, result)
         row_summary = self._finalize_row(row_dir, row_meta, results)
@@ -71,9 +71,6 @@ class RowWorkflow:
             if p.is_dir() and (p / "row_meta.json").exists()
         ]
         print(f"[INFO] 待解码 row 数量: {len(row_dirs)}")
-
-        if self.ai_processor is not None:
-            self.ai_processor.prepare()
 
         all_rows_summary: list[dict[str, Any]] = []
         futures: dict[Any, tuple[str, dict[str, Any], dict[str, Any]]] = {}
@@ -96,7 +93,7 @@ class RowWorkflow:
                     all_rows_summary.append(self._build_workflow_row_summary(summary, row_dir))
                     continue
                 for task in tasks:
-                    future = executor.submit(self._process_task_worker, row_meta, task)
+                    future = executor.submit(self._process_task_worker, row_meta, task, False)
                     futures[future] = (row_id, row_meta, task)
 
             for future in as_completed(list(futures.keys())):
@@ -238,7 +235,7 @@ class RowWorkflow:
 
                 print(f"[INFO] {row_id} 下载完成，提交 {len(tasks)} 个 task 到线程池")
                 for task in tasks:
-                    future = executor.submit(self._process_task_worker, row_meta, task)
+                    future = executor.submit(self._process_task_worker, row_meta, task, True)
                     futures[future] = (row_id, row_meta, task)
 
             for future in as_completed(list(futures.keys())):
@@ -277,7 +274,7 @@ class RowWorkflow:
 
     # ---------------- worker ----------------
 
-    def _process_task_worker(self, row_meta: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    def _process_task_worker(self, row_meta: dict[str, Any], task: dict[str, Any], run_ai: bool = True) -> dict[str, Any]:
         task_id = task["task_id"]
         target_ts = task.get("target_ts")
         row_dir = self.output_root / row_meta["row_id"]
@@ -308,7 +305,7 @@ class RowWorkflow:
                 "decode_summary": decode_result.get("summary", {}),
             })
 
-            if self.ai_processor is not None:
+            if run_ai and self.ai_processor is not None:
                 print(f"[INFO] {row_meta['row_id']}/{task_id} 开始逐帧 AI")
                 ai_result = self.ai_processor.run_for_task_sequence(
                     row_meta=row_meta,
@@ -499,7 +496,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="DriveInsight 行级下载 + 多时间点解码 + 逐帧 AI 并发工作流")
     parser.add_argument("--config", default="config.json", help="config.json 路径")
     parser.add_argument("--download-only", action="store_true", help="仅执行下载")
-    parser.add_argument("--decode-only", action="store_true", help="仅对已存在 row 执行解码 + AI")
+    parser.add_argument("--decode-only", action="store_true", help="仅对已存在 row 执行解码（不调用 AI）")
     parser.add_argument("--ai-only", action="store_true", help="仅执行 AI（基于已存在 manifest/图片）")
     parser.add_argument("--force-delete-bags", action="store_true", help="执行完 row 后强制删除 bag（覆盖 config.cleanup.delete_bags_after_row）")
     parser.add_argument("--row-dir", help="仅对单个 row_dir 执行解码 + AI")

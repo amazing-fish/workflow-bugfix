@@ -5,6 +5,7 @@ import json
 import mimetypes
 import re
 import ssl
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -400,6 +401,9 @@ class WorkflowAIProcessor:
             "result_dir": str(task_dir),
             "detail_note": "sample级详情请查看每个 sample*/ai 目录下的明细文件",
         }
+        cleanup_report = self._cleanup_no_samples(task_dir, sequence_results)
+        if cleanup_report is not None:
+            result["cleanup"] = cleanup_report
         save_json(result, task_dir / "ai_result_summary.json")
         return result
 
@@ -439,7 +443,8 @@ class WorkflowAIProcessor:
         for _, info in bags.items():
             for frame in info.get("frames", []):
                 sample_name = frame.get("sample")
-                if frame.get("status") == "ok" and sample_name:
+                image_path = frame.get("image_path")
+                if frame.get("status") == "ok" and sample_name and image_path and Path(image_path).exists():
                     all_samples.add(sample_name)
         def sort_key(name: str) -> tuple[int, str]:
             m = re.search(r"(\d+)", name)
@@ -723,4 +728,38 @@ class WorkflowAIProcessor:
             "suspected_count": suspected_count,
             "result_sequence": result_sequence,
             "detailed_sequence": detailed_sequence,
+        }
+
+    def _cleanup_no_samples(self, task_dir: Path, sequence_results: list[dict[str, Any]]) -> dict[str, Any] | None:
+        cleanup_cfg = self.ai_cfg.get("cleanup", {})
+        enabled = bool(cleanup_cfg.get("delete_no_prediction_samples", True))
+        if not enabled:
+            return None
+
+        deleted_dirs: list[str] = []
+        missing_dirs: list[str] = []
+        failed_dirs: list[dict[str, str]] = []
+        for item in sequence_results:
+            if item.get("collision_pred") != "否":
+                continue
+            sample_name = item.get("sample_name")
+            if not sample_name:
+                continue
+            sample_dir = task_dir / str(sample_name)
+            if not sample_dir.exists():
+                missing_dirs.append(str(sample_dir))
+                continue
+            try:
+                shutil.rmtree(sample_dir)
+                deleted_dirs.append(str(sample_dir))
+            except Exception as e:
+                failed_dirs.append({"sample_dir": str(sample_dir), "error": str(e)})
+
+        return {
+            "enabled": True,
+            "delete_target": "collision_pred=否",
+            "deleted": len(failed_dirs) == 0,
+            "deleted_sample_dirs": deleted_dirs,
+            "missing_sample_dirs": missing_dirs,
+            "failed_sample_dirs": failed_dirs,
         }

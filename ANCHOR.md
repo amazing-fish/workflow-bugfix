@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.2.4`
+- 当前版本：`v0.2.6`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -21,6 +21,20 @@
    - 聚合摘要仅保留决策与状态字段 + 明细路径。
 
 ## 修改日志（稳定）
+- `v0.2.6` `bugfix`（2026-04-02）
+  - 修复 `workflow.py` 的仅解码全量模式初始化行为：
+    - `run_decode_for_all_rows()` 不再调用 `ai_processor.prepare()`，避免 `--decode-only` 仍依赖 AI `/parameters` 接口可用性。
+    - 保证仅解码流程在 AI 服务不可用时仍可独立执行。
+  - 修复 `ai_runner.py` 的 AI-only 可重跑问题：
+    - `sample` 序列收集时新增图片存在性校验，仅纳入磁盘上仍存在图片的样本。
+    - 当此前已清理 `collision_pred=否` 的样本目录后，后续 `--ai-only` 重跑不会再因缺图产生确定性失败。
+- `v0.2.5` `bugfix`（2026-04-02）
+  - 修复 `workflow.py` 的仅解码路径行为：
+    - `--decode-only` 与监控面板“解码图片（删除bag）”模式下，仅执行解码，不再触发 AI 推理。
+    - 全流程与 `--ai-only` 仍保持原有 AI 行为。
+  - 修复 `ai_runner.py` 的样本清理行为：
+    - AI 完成后新增按判定清理：自动删除 `collision_pred=否` 的 `sample` 目录，保留其余样本。
+    - 在 `ai_result_summary.json` 增加 `cleanup` 字段，记录删除结果与失败原因，便于追踪。
 - `v0.2.4` `bugfix`（2026-04-02）
   - 修复 `ai_runner.py` 中 `none_retry_count` 统计偏大的问题：
     - 当最终一次尝试仍为 `None` 且已无后续重试机会时，不再累计重试次数。

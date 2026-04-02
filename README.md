@@ -33,7 +33,7 @@ python monitor_gui.py
   ```bash
   python workflow.py --config config.json --download-only
   ```
-- 仅解码 + AI（对已有输出目录）：
+- 仅解码（对已有输出目录）：
   ```bash
   python workflow.py --config config.json --decode-only
   ```
