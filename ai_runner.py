@@ -443,7 +443,8 @@ class WorkflowAIProcessor:
         for _, info in bags.items():
             for frame in info.get("frames", []):
                 sample_name = frame.get("sample")
-                if frame.get("status") == "ok" and sample_name:
+                image_path = frame.get("image_path")
+                if frame.get("status") == "ok" and sample_name and image_path and Path(image_path).exists():
                     all_samples.add(sample_name)
         def sort_key(name: str) -> tuple[int, str]:
             m = re.search(r"(\d+)", name)

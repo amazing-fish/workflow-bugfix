@@ -72,9 +72,6 @@ class RowWorkflow:
         ]
         print(f"[INFO] 待解码 row 数量: {len(row_dirs)}")
 
-        if self.ai_processor is not None:
-            self.ai_processor.prepare()
-
         all_rows_summary: list[dict[str, Any]] = []
         futures: dict[Any, tuple[str, dict[str, Any], dict[str, Any]]] = {}
         row_states: dict[str, dict[str, Any]] = {}
