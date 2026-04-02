@@ -24,7 +24,7 @@ class RowWorkflow:
     5. 某个 row 全部 task 完成后，再根据配置删除该 row 的 bag。
     """
 
-    def __init__(self, config_path: str | Path):
+    def __init__(self, config_path: str | Path, force_delete_bags: bool = False):
         self.config_path = Path(config_path)
         with open(self.config_path, "r", encoding="utf-8") as f:
             self.cfg = json.load(f)
@@ -35,6 +35,8 @@ class RowWorkflow:
             or "outputs"
         )
         self.cleanup_cfg = self.cfg.get("cleanup", {})
+        if force_delete_bags:
+            self.cleanup_cfg["delete_bags_after_row"] = True
         self.pipeline_cfg = self.cfg.get("pipeline", {})
         self.max_concurrency = int(self.pipeline_cfg.get("max_concurrency", 3))
         self.ai_enabled = bool(self.cfg.get("ai", {}).get("enabled", False))
@@ -126,6 +128,77 @@ class RowWorkflow:
             "completed_rows": sum(1 for row in all_rows_summary if row.get("status") == "completed"),
             "failed_rows": sum(1 for row in all_rows_summary if row.get("status") != "completed"),
             "rows": all_rows_summary,
+        }
+        self._save_json(self.output_root / "workflow_summary.json", summary)
+        return summary
+
+    def run_ai_for_all_rows(self) -> dict[str, Any]:
+        if self.ai_processor is None:
+            raise RuntimeError("config.ai.enabled=false，无法执行仅 AI 模式")
+        if not self.output_root.exists():
+            raise FileNotFoundError(f"输出目录不存在: {self.output_root}")
+
+        row_dirs = [
+            p for p in sorted(self.output_root.iterdir())
+            if p.is_dir() and (p / "row_meta.json").exists()
+        ]
+        print(f"[INFO] 待执行仅 AI 的 row 数量: {len(row_dirs)}")
+        self.ai_processor.prepare()
+
+        row_summaries: list[dict[str, Any]] = []
+        for row_dir in row_dirs:
+            row_meta = self._load_json(row_dir / "row_meta.json")
+            row_id = row_meta.get("row_id") or row_dir.name
+            task_results: list[dict[str, Any]] = []
+            for task in row_meta.get("tasks", []):
+                task_id = task.get("task_id")
+                if not task_id:
+                    continue
+                task_dir = row_dir / task_id
+                task_meta_path = task_dir / "task_meta.json"
+                if not task_meta_path.exists():
+                    task_results.append({
+                        "task_id": task_id,
+                        "target_ts": task.get("target_ts"),
+                        "status": "failed",
+                        "error": f"missing task_meta: {task_meta_path}",
+                        "task_dir": str(task_dir),
+                    })
+                    continue
+                task_meta = self._load_json(task_meta_path)
+                if not (task_dir / "manifest.json").exists():
+                    task_meta.update({
+                        "status": "failed",
+                        "error": f"missing manifest: {task_dir / 'manifest.json'}",
+                    })
+                    task_results.append(task_meta)
+                    self._write_task_result_to_disk(row_dir, task_meta)
+                    continue
+                print(f"[INFO] {row_id}/{task_id} 直接执行 AI")
+                try:
+                    ai_result = self.ai_processor.run_for_task_sequence(
+                        row_meta=row_meta,
+                        task_meta=task_meta,
+                        task_dir=task_dir,
+                    )
+                    task_meta["ai"] = ai_result
+                    task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
+                except Exception as e:
+                    task_meta["status"] = "failed"
+                    task_meta["error"] = str(e)
+                task_results.append(task_meta)
+                self._write_task_result_to_disk(row_dir, task_meta)
+
+            row_summary = self._finalize_row(row_dir, row_meta, task_results)
+            row_summaries.append(self._build_workflow_row_summary(row_summary, row_dir))
+
+        summary = {
+            "output_root": str(self.output_root),
+            "total_rows": len(row_summaries),
+            "completed_rows": sum(1 for row in row_summaries if row.get("status") == "completed"),
+            "failed_rows": sum(1 for row in row_summaries if row.get("status") != "completed"),
+            "mode": "ai-only",
+            "rows": row_summaries,
         }
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
@@ -426,16 +499,19 @@ def parse_args():
     parser.add_argument("--config", default="config.json", help="config.json 路径")
     parser.add_argument("--download-only", action="store_true", help="仅执行下载")
     parser.add_argument("--decode-only", action="store_true", help="仅对已存在 row 执行解码 + AI")
+    parser.add_argument("--ai-only", action="store_true", help="仅执行 AI（基于已存在 manifest/图片）")
+    parser.add_argument("--force-delete-bags", action="store_true", help="执行完 row 后强制删除 bag（覆盖 config.cleanup.delete_bags_after_row）")
     parser.add_argument("--row-dir", help="仅对单个 row_dir 执行解码 + AI")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    wf = RowWorkflow(args.config)
+    wf = RowWorkflow(args.config, force_delete_bags=args.force_delete_bags)
     try:
-        if args.download_only and args.decode_only:
-            raise ValueError("--download-only 和 --decode-only 不能同时使用")
+        enabled_modes = [args.download_only, args.decode_only, args.ai_only]
+        if sum(1 for x in enabled_modes if x) > 1:
+            raise ValueError("--download-only / --decode-only / --ai-only 只能选择一个")
 
         if args.download_only:
             wf.run_download()
@@ -446,6 +522,10 @@ def main():
                 wf.run_decode_for_row(args.row_dir)
             else:
                 wf.run_decode_for_all_rows()
+            return
+
+        if args.ai_only:
+            wf.run_ai_for_all_rows()
             return
 
         wf.run_pipeline()
