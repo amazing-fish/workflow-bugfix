@@ -337,7 +337,7 @@ class WorkflowAIProcessor:
                     collision_pred = None
                     retry_count = 0
 
-                    for _ in range(max_retry + 1):
+                    for attempt in range(max_retry + 1):
                         stream_result = self._run_workflow_streaming(client, payload, ai_dir)
                         schema_report = validate_final_schema(self.ai_cfg, stream_result.get("final_structured_output"))
                         normalized = normalize_final_output(self.ai_cfg, stream_result.get("final_structured_output"))
@@ -345,8 +345,8 @@ class WorkflowAIProcessor:
 
                         if not is_none_like_output(collision_pred):
                             break
-                        retry_count += 1
-                        if retry_count <= max_retry:
+                        if attempt < max_retry:
+                            retry_count += 1
                             log_warn(
                                 f"{row_meta.get('row_id')}/{task_meta.get('task_id')}/{sample_name} "
                                 f"输出为 None，触发重试 {retry_count}/{max_retry}"
