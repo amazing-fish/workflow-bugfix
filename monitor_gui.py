@@ -115,7 +115,7 @@ class MonitorApp:
             return
         cmd = self._build_cmd(mode)
         self._append_log(f"[CMD] {' '.join(cmd)}")
-        self.proc = subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             cwd=str(ROOT),
             stdout=subprocess.PIPE,
@@ -123,8 +123,9 @@ class MonitorApp:
             text=True,
             bufsize=1,
         )
+        self.proc = proc
         self.status_text.set(f"运行中（{mode}）")
-        threading.Thread(target=self._drain_output, daemon=True).start()
+        threading.Thread(target=self._drain_output, args=(proc, mode), daemon=True).start()
 
     def stop_mode(self) -> None:
         if self.proc is None or self.proc.poll() is not None:
@@ -133,12 +134,12 @@ class MonitorApp:
         self.proc.terminate()
         self._append_log("[INFO] 已发送终止信号。")
 
-    def _drain_output(self) -> None:
-        assert self.proc is not None
-        for line in self.proc.stdout or []:
+    def _drain_output(self, proc: subprocess.Popen, mode: str) -> None:
+        for line in proc.stdout or []:
             self.root.after(0, self._append_log, line.rstrip("\n"))
-        code = self.proc.wait()
-        self.root.after(0, self.status_text.set, f"已结束（exit={code}）")
+        code = proc.wait()
+        if self.proc is proc:
+            self.root.after(0, self.status_text.set, f"已结束（{mode}, exit={code}）")
 
     def _refresh_loop(self) -> None:
         stats = collect_task_stats(self.output_root)

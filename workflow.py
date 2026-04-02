@@ -183,6 +183,7 @@ class RowWorkflow:
                     )
                     task_meta["ai"] = ai_result
                     task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
+                    task_meta.pop("error", None)
                 except Exception as e:
                     task_meta["status"] = "failed"
                     task_meta["error"] = str(e)
