@@ -325,7 +325,7 @@ class MultiFrameDecoder:
                     if payload:
                         f.write(payload)
 
-            out_pattern = frames_dir / "frame_%04d.png"
+            out_pattern = frames_dir / f"frame_%04d.{self.image_ext}"
             cmd = [
                 self.ffmpeg_path,
                 "-y",
@@ -335,7 +335,7 @@ class MultiFrameDecoder:
             ]
             proc = subprocess.run(cmd, capture_output=True, text=True)
 
-            generated = sorted(frames_dir.glob("frame_*.png"))
+            generated = sorted(frames_dir.glob(f"frame_*.{self.image_ext}"))
             if proc.returncode == 0 and generated:
                 shutil.copyfile(generated[-1], output_path)
                 return True
