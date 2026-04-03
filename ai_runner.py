@@ -859,7 +859,8 @@ class WorkflowAIProcessor:
         missing_dirs: list[str] = []
         failed_dirs: list[dict[str, str]] = []
         for item in sequence_results:
-            if item.get("collision_pred") != "否":
+            label = to_analysis_label(item.get("collision_pred"))
+            if label != "no":
                 continue
             sample_name = item.get("sample_name")
             if not sample_name:
