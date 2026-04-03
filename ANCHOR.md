@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.2`
+- 当前版本：`v0.3.3`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,13 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.3` `bugfix`（2026-04-03）
+  - AI 重试策略增强：
+    - 除 `None` 外，若结构化输出出现 enum 非法值，也会触发重试。
+    - 明确 AI 调用失败重试场景：`Server disconnected without sending a response`、`502 Bad Gateway`、`504 Gateway Time-out`。
+    - 命中上述调用失败后，固定等待 60 秒再重试。
+    - sample 摘要新增 `retry_count` 与 `retry_reasons`，并保留 `none_retry_count` 统计。
+
 - `v0.3.2` `bugfix`（2026-04-03）
   - 日志时间格式优化：
     - GUI 日志时间戳改为仅保留分钟（`HH:MM`），去除年月日。

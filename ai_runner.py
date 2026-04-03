@@ -72,6 +72,16 @@ def is_none_like_output(value: Any) -> bool:
     return False
 
 
+def is_retryable_ai_error(error: Exception) -> bool:
+    message = str(error)
+    retryable_markers = [
+        "Server disconnected without sending a response",
+        "Server error '502 Bad Gateway' for url",
+        "Server error '504 Gateway Time-out' for url",
+    ]
+    return any(marker in message for marker in retryable_markers)
+
+
 def guess_mime_type(path: Path) -> str:
     return (
         mimetypes.guess_type(path.name)[0]
@@ -355,21 +365,60 @@ class WorkflowAIProcessor:
                     normalized: dict[str, Any] | None = None
                     collision_pred = None
                     retry_count = 0
+                    none_retry_count = 0
+                    retry_reasons: list[str] = []
 
                     for attempt in range(max_retry + 1):
-                        stream_result = self._run_workflow_streaming(client, payload, ai_dir)
-                        schema_report = validate_final_schema(self.ai_cfg, stream_result.get("final_structured_output"))
-                        normalized = normalize_final_output(self.ai_cfg, stream_result.get("final_structured_output"))
-                        collision_pred = normalized.get("collision_pred") if isinstance(normalized, dict) else None
-
-                        if not is_none_like_output(collision_pred):
-                            break
-                        if attempt < max_retry:
-                            retry_count += 1
-                            log_warn(
-                                f"{row_meta.get('row_id')}/{task_meta.get('task_id')}/{sample_name} "
-                                f"输出为 None，触发重试 {retry_count}/{max_retry}"
+                        try:
+                            stream_result = self._run_workflow_streaming(client, payload, ai_dir)
+                            schema_report = validate_final_schema(
+                                self.ai_cfg,
+                                stream_result.get("final_structured_output"),
                             )
+                            normalized = normalize_final_output(
+                                self.ai_cfg,
+                                stream_result.get("final_structured_output"),
+                            )
+                            collision_pred = (
+                                normalized.get("collision_pred") if isinstance(normalized, dict) else None
+                            )
+
+                            if is_none_like_output(collision_pred):
+                                if attempt < max_retry:
+                                    retry_count += 1
+                                    none_retry_count += 1
+                                    retry_reasons.append("none")
+                                    log_warn(
+                                        f"{row_meta.get('row_id')}/{task_meta.get('task_id')}/{sample_name} "
+                                        f"输出为 None，触发重试 {retry_count}/{max_retry}"
+                                    )
+                                    continue
+                                break
+
+                            if schema_report.get("enum_errors"):
+                                if attempt < max_retry:
+                                    retry_count += 1
+                                    retry_reasons.append("enum")
+                                    log_warn(
+                                        f"{row_meta.get('row_id')}/{task_meta.get('task_id')}/{sample_name} "
+                                        f"输出含 enum 非法值，触发重试 {retry_count}/{max_retry}: "
+                                        f"{pretty(schema_report.get('enum_errors'))}"
+                                    )
+                                    continue
+                                break
+
+                            break
+                        except Exception as e:
+                            if attempt < max_retry and is_retryable_ai_error(e):
+                                retry_count += 1
+                                retry_reasons.append("ai_call_error")
+                                log_warn(
+                                    f"{row_meta.get('row_id')}/{task_meta.get('task_id')}/{sample_name} "
+                                    f"AI 调用失败，60 秒后重试 {retry_count}/{max_retry}: {e}"
+                                )
+                                time.sleep(60)
+                                continue
+                            raise
 
                     save_json(stream_result, ai_dir / "workflow_stream_result.json")
                     save_json(schema_report, ai_dir / "workflow_final_schema_report.json")
@@ -380,7 +429,9 @@ class WorkflowAIProcessor:
                         "sample_name": sample_name,
                         "status": "ok" if schema_report.get("ok") else "schema_invalid",
                         "collision_pred": collision_pred,
-                        "none_retry_count": retry_count,
+                        "none_retry_count": none_retry_count,
+                        "retry_count": retry_count,
+                        "retry_reasons": retry_reasons,
                         "selected_count": len(images),
                         "schema_ok": schema_report.get("ok"),
                         "nearest_obstacle_distance_m": (normalized or {}).get("nearest_obstacle_distance_m"),
