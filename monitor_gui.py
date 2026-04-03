@@ -118,7 +118,7 @@ class MonitorApp:
 
     @staticmethod
     def _with_timestamp(msg: str) -> str:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        timestamp = datetime.now().strftime("%H:%M")
         return f"[{timestamp}] {msg}"
 
     def clear_logs(self) -> None:
