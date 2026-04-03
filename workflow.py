@@ -10,6 +10,7 @@ from typing import Any
 from bag import DIBagDownloader
 from frame import MultiFrameDecoder
 from ai_runner import WorkflowAIProcessor
+from preflight import run_preflight, format_preflight
 
 
 class RowWorkflow:
@@ -620,6 +621,12 @@ def parse_args():
 
 def main():
     args = parse_args()
+    preflight_result = run_preflight(args.config)
+    print(format_preflight(preflight_result))
+    if not preflight_result["passed"]:
+        print("[FATAL] 预检未通过，请修复上述问题后重试。")
+        return
+
     wf = RowWorkflow(args.config, force_delete_bags=args.force_delete_bags)
     try:
         enabled_modes = [args.download_only, args.decode_only, args.ai_only]
