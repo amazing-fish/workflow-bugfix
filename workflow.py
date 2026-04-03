@@ -315,7 +315,7 @@ class RowWorkflow:
                     task_meta=task_meta,
                     task_dir=task_dir,
                 )
-                task_meta["ai"] = ai_result
+                task_meta["ai"] = self._compact_ai_result(ai_result)
                 task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
             else:
                 task_meta["status"] = "completed"
@@ -367,7 +367,7 @@ class RowWorkflow:
                 task_meta=task_meta,
                 task_dir=task_dir,
             )
-            task_meta["ai"] = ai_result
+            task_meta["ai"] = self._compact_ai_result(ai_result)
             task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
             task_meta.pop("error", None)
         except Exception as e:
@@ -420,6 +420,21 @@ class RowWorkflow:
             },
         }
 
+    @staticmethod
+    def _compact_ai_result(ai_result: dict[str, Any]) -> dict[str, Any]:
+        result_dir = ai_result.get("result_dir")
+        summary_path = str(Path(result_dir) / "ai_result_summary.json") if result_dir else None
+        return {
+            "status": ai_result.get("status"),
+            "elapsed_sec": ai_result.get("elapsed_sec"),
+            "sample_count": ai_result.get("sample_count"),
+            "aggregate": ai_result.get("aggregate"),
+            "analysis": ai_result.get("analysis"),
+            "retained_samples": ai_result.get("retained_samples"),
+            "cleanup": ai_result.get("cleanup"),
+            "ai_result_summary_path": summary_path,
+        }
+
     def _write_task_result_to_disk(self, row_dir: Path, result: dict[str, Any]) -> None:
         task_id = result.get("task_id") or "unknown"
         task_dir = row_dir / task_id
@@ -449,6 +464,7 @@ class RowWorkflow:
         ok_tasks = sum(1 for r in results if r.get("status") == "completed")
         failed_tasks = total_tasks - ok_tasks
         status = "completed" if total_tasks > 0 and failed_tasks == 0 else "partial_failed"
+        row_analysis = self._build_row_analysis(row_meta, results)
 
         row_summary = {
             "row_id": row_meta.get("row_id"),
@@ -457,6 +473,7 @@ class RowWorkflow:
             "total_tasks": total_tasks,
             "ok_tasks": ok_tasks,
             "failed_tasks": failed_tasks,
+            "analysis": row_analysis,
             "task_summaries": self._build_row_task_summaries(results),
         }
 
@@ -466,9 +483,12 @@ class RowWorkflow:
             row_meta["cleanup"] = cleanup_result
 
         row_meta["status"] = status
+        row_meta["analysis"] = row_analysis
         row_meta["row_summary_path"] = str(row_dir / "row_summary.json")
         self._save_json(row_dir / "row_summary.json", row_summary)
         self._save_json(row_dir / "row_meta.json", row_meta)
+        print(f"[INFO] {row_analysis['count_line']}")
+        print(f"[INFO] {row_analysis['row_key']} 保留样本: {row_analysis['retained_line']}")
         return row_summary
 
     @staticmethod
@@ -496,8 +516,56 @@ class RowWorkflow:
             "total_tasks": row_summary.get("total_tasks"),
             "ok_tasks": row_summary.get("ok_tasks"),
             "failed_tasks": row_summary.get("failed_tasks"),
+            "analysis": row_summary.get("analysis"),
             "row_summary_path": str(row_dir / "row_summary.json"),
             "cleanup": row_summary.get("cleanup"),
+        }
+
+    @staticmethod
+    def _build_row_analysis(row_meta: dict[str, Any], results: list[dict[str, Any]]) -> dict[str, Any]:
+        row_key = str(row_meta.get("row_id") or "unknown_row")
+        no_count = 0
+        suspected_count = 0
+        yes_count = 0
+        retained_pairs: list[str] = []
+        task_lines: list[str] = []
+
+        for item in sorted(results, key=lambda x: str(x.get("task_id", ""))):
+            task_id = str(item.get("task_id") or "unknown_task")
+            ai_summary = item.get("ai") if isinstance(item.get("ai"), dict) else {}
+            aggregate = ai_summary.get("aggregate") if isinstance(ai_summary.get("aggregate"), dict) else {}
+            no_count += int(aggregate.get("no_count", 0))
+            suspected_count += int(aggregate.get("suspected_count", 0))
+            yes_count += int(aggregate.get("yes_count", 0))
+
+            analysis = ai_summary.get("analysis") if isinstance(ai_summary.get("analysis"), dict) else {}
+            task_count_line = analysis.get("count_line")
+            if task_count_line:
+                task_lines.append(str(task_count_line))
+
+            retained_samples = ai_summary.get("retained_samples")
+            if isinstance(retained_samples, list):
+                for sample in retained_samples:
+                    if not isinstance(sample, dict):
+                        continue
+                    sample_name = sample.get("sample_name")
+                    result = sample.get("result")
+                    if not sample_name or not result:
+                        continue
+                    retained_pairs.append(f"{task_id}/{sample_name}:{result}")
+
+        count_line = f"{row_key}: [no:{no_count},suspected:{suspected_count},yes:{yes_count}]"
+        retained_line = f"[{','.join(retained_pairs)}]" if retained_pairs else "[]"
+        return {
+            "row_key": row_key,
+            "counts": {
+                "no": no_count,
+                "suspected": suspected_count,
+                "yes": yes_count,
+            },
+            "count_line": count_line,
+            "retained_line": retained_line,
+            "task_count_lines": task_lines,
         }
 
     def _cleanup_bags_if_needed(self, row_dir: Path, row_meta: dict[str, Any], row_summary: dict[str, Any]) -> dict[str, Any] | None:

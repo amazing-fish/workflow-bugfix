@@ -46,6 +46,24 @@ def save_json(obj: Any, path: Path) -> None:
     path.write_text(pretty(obj), encoding="utf-8")
 
 
+def to_analysis_label(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+    else:
+        normalized = str(value).strip().lower()
+    mapping = {
+        "否": "no",
+        "疑似": "suspected",
+        "是": "yes",
+        "no": "no",
+        "suspected": "suspected",
+        "yes": "yes",
+    }
+    return mapping.get(normalized)
+
+
 def is_none_like_output(value: Any) -> bool:
     if value is None:
         return True
@@ -392,12 +410,16 @@ class WorkflowAIProcessor:
                     log_error(f"{row_meta.get('row_id')}/{task_meta.get('task_id')}/{sample_name} AI 失败: {e}")
 
         aggregate = self._aggregate_sequence_results(sequence_results)
+        retained_samples = self._build_retained_samples(sequence_results)
+        analysis = self._build_task_analysis(row_meta, task_meta, aggregate, retained_samples)
         result = {
             "status": "ok" if aggregate["failed_samples"] == 0 else "partial_failed",
             "elapsed_sec": round(time.time() - started, 3),
             "sample_count": len(sample_names),
             "sequence_results": sequence_results,
             "aggregate": aggregate,
+            "analysis": analysis,
+            "retained_samples": retained_samples,
             "result_dir": str(task_dir),
             "detail_note": "sample级详情请查看每个 sample*/ai 目录下的明细文件",
         }
@@ -405,6 +427,8 @@ class WorkflowAIProcessor:
         if cleanup_report is not None:
             result["cleanup"] = cleanup_report
         save_json(result, task_dir / "ai_result_summary.json")
+        log_info(analysis["count_line"])
+        log_info(f"{analysis['task_key']} 保留样本: {analysis['retained_line']}")
         return result
 
     # ---------------- internal ----------------
@@ -700,23 +724,25 @@ class WorkflowAIProcessor:
         for item in sequence_results:
             pred = item.get("collision_pred")
             status = item.get("status")
-            if pred == "是":
+            compact_label = to_analysis_label(pred)
+            if compact_label == "yes":
                 yes_count += 1
                 valid_samples += 1
-            elif pred == "否":
+            elif compact_label == "no":
                 no_count += 1
                 valid_samples += 1
-            elif pred == "疑似":
+            elif compact_label == "suspected":
                 suspected_count += 1
                 valid_samples += 1
             else:
                 if status == "failed":
                     failed_samples += 1
-            result_sequence.append(pred)
+            result_sequence.append(compact_label or pred)
             detailed_sequence.append({
                 "sample_name": item.get("sample_name"),
                 "status": status,
                 "collision_pred": pred,
+                "compact_label": compact_label,
             })
 
         return {
@@ -728,6 +754,48 @@ class WorkflowAIProcessor:
             "suspected_count": suspected_count,
             "result_sequence": result_sequence,
             "detailed_sequence": detailed_sequence,
+        }
+
+    def _build_retained_samples(self, sequence_results: list[dict[str, Any]]) -> list[dict[str, str]]:
+        retained = []
+        for item in sequence_results:
+            label = to_analysis_label(item.get("collision_pred"))
+            if label not in {"suspected", "yes"}:
+                continue
+            sample_name = item.get("sample_name")
+            if not sample_name:
+                continue
+            retained.append({
+                "sample_name": str(sample_name),
+                "result": label,
+            })
+        return retained
+
+    def _build_task_analysis(
+        self,
+        row_meta: dict[str, Any],
+        task_meta: dict[str, Any],
+        aggregate: dict[str, Any],
+        retained_samples: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        row_id = str(row_meta.get("row_id") or "unknown_row")
+        task_id = str(task_meta.get("task_id") or "unknown_task")
+        task_key = f"{row_id}/{task_id}"
+        no_count = int(aggregate.get("no_count", 0))
+        suspected_count = int(aggregate.get("suspected_count", 0))
+        yes_count = int(aggregate.get("yes_count", 0))
+        count_line = f"{task_key}: [no:{no_count},suspected:{suspected_count},yes:{yes_count}]"
+        retained_pairs = [f"{item['sample_name']}:{item['result']}" for item in retained_samples]
+        retained_line = f"[{','.join(retained_pairs)}]" if retained_pairs else "[]"
+        return {
+            "task_key": task_key,
+            "counts": {
+                "no": no_count,
+                "suspected": suspected_count,
+                "yes": yes_count,
+            },
+            "count_line": count_line,
+            "retained_line": retained_line,
         }
 
     def _cleanup_no_samples(self, task_dir: Path, sequence_results: list[dict[str, Any]]) -> dict[str, Any] | None:
