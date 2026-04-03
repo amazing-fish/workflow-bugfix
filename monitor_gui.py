@@ -167,7 +167,12 @@ class MonitorApp:
             self._append_log("[INFO] 当前无运行中的任务。")
             return
         self.proc.terminate()
-        self._append_log("[INFO] 已发送终止信号。")
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait(timeout=3)
+        self._append_log("[INFO] 已终止任务。")
 
     def _drain_output(self, proc: subprocess.Popen, mode: str) -> None:
         if proc.stdout is not None:
