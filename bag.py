@@ -64,7 +64,6 @@ class DIBagDownloader:
 
         self.session = requests.Session()
         self.common_headers = {
-            "Content-Type": "application/json",
             "Accept-Language": "zh-CN",
             **self.browser_headers,
         }
@@ -450,7 +449,7 @@ class DIBagDownloader:
         save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / save_name
         url = obs_download_url + "/obs/v1/files/download?opid=" + obs_id
-        headers = self._headers_for("rivulet")
+        headers = self._headers_for("rivulet", json_body=False)
         last_error: Exception | None = None
         max_attempts = max(1, self.download_retry_times + 1)
 
@@ -548,9 +547,11 @@ class DIBagDownloader:
             return core + "/archive/" + topic + ".bag"
         return core + "archive/" + topic + ".bag"
 
-    def _headers_for(self, platform: str) -> dict[str, str]:
+    def _headers_for(self, platform: str, json_body: bool = True) -> dict[str, str]:
         headers = dict(self.common_headers)
         headers["Deepdata-platform"] = platform
+        if json_body:
+            headers["Content-Type"] = "application/json"
         return headers
 
 
