@@ -239,7 +239,13 @@ class MultiFrameDecoder:
                 break
 
         indices = indices[:window_size]
-        rels = list(range(-before_frames, after_frames + 1))
+        rels = list(range(-before_frames, after_frames + 1))[:len(indices)]
+        if len(indices) < window_size:
+            print(
+                f"[WARN] 帧数不足: 需要 {window_size} 帧，实际仅 {len(indices)} 帧 "
+                f"(total={total}, center_idx={center_idx})，"
+                f"sample 编号保持连续槽位，真实偏移见 delta_to_center_sec"
+            )
         return list(zip(rels, indices))
 
     def _find_payload(self, msg) -> tuple[bytes | None, str | None]:
