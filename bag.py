@@ -488,16 +488,7 @@ class DIBagDownloader:
 
     @staticmethod
     def _looks_like_zip(content: bytes) -> bool:
-        if len(content) < 4:
-            return False
-        zip_magic_set = {
-            b"PK\x03\x04",  # local file header
-            b"PK\x05\x06",  # end of central directory (可能是空 zip)
-            b"PK\x07\x08",  # spanned/split zip
-        }
-        if content[:4] in zip_magic_set:
-            return True
-        return zipfile.is_zipfile(io.BytesIO(content))
+        return len(content) >= 4 and content[:4] == b"PK\x03\x04"
 
     @staticmethod
     def _validate_bag_magic(content: bytes, save_name: str, source: str) -> None:
