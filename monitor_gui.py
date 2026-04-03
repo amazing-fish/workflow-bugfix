@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+from datetime import datetime
 from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, X, Y, Button, Frame, Label, Scrollbar, StringVar, Text, Tk
 
@@ -111,9 +112,14 @@ class MonitorApp:
         self.log.configure(yscrollcommand=y_scroll.set)
 
     def _append_log(self, msg: str) -> None:
-        self.log.insert(END, msg + "\n")
+        self.log.insert(END, self._with_timestamp(msg) + "\n")
         if self.auto_scroll.get() == "on":
             self.log.see(END)
+
+    @staticmethod
+    def _with_timestamp(msg: str) -> str:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        return f"[{timestamp}] {msg}"
 
     def clear_logs(self) -> None:
         self.log.delete("1.0", END)
