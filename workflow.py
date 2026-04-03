@@ -449,15 +449,11 @@ class RowWorkflow:
             if item is None:
                 updated_tasks.append(task)
                 continue
-            updated_tasks.append({
-                "task_id": task.get("task_id"),
-                "target_ts": task.get("target_ts"),
-                "status": item.get("status"),
-                "task_dir": item.get("task_dir"),
-                "manifest_path": item.get("manifest_path"),
-                "ai_status": (item.get("ai") or {}).get("status") if isinstance(item.get("ai"), dict) else None,
-                "error": item.get("error"),
-            })
+            merged = dict(task)
+            merged.update(item)
+            merged["ai_status"] = (item.get("ai") or {}).get("status") if isinstance(item.get("ai"), dict) else None
+            merged.pop("ai", None)
+            updated_tasks.append(merged)
         row_meta["tasks"] = updated_tasks
 
         total_tasks = len(results)
