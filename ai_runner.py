@@ -649,7 +649,7 @@ class WorkflowAIProcessor:
         save_raw_events_ndjson = bool(self.runtime_cfg.get("save_raw_events_ndjson", True))
 
         raw_events_path = ai_dir / "workflow_raw_events.ndjson"
-        raw_fp = raw_events_path.open("w", encoding="utf-8") if save_raw_events_ndjson else None
+        raw_fp = None
 
         result: dict[str, Any] = {
             "workflow_run_id": None,
@@ -671,6 +671,7 @@ class WorkflowAIProcessor:
         }
 
         try:
+            raw_fp = raw_events_path.open("w", encoding="utf-8") if save_raw_events_ndjson else None
             with client.stream(
                 "POST",
                 f"{self.api_cfg['base_url'].rstrip('/')}/workflows/run",
