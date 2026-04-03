@@ -5,7 +5,7 @@ import json
 import subprocess
 import threading
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, Button, Frame, Label, StringVar, Text, Tk
+from tkinter import BOTH, END, LEFT, RIGHT, X, Y, Button, Frame, Label, Scrollbar, StringVar, Text, Tk
 
 
 ROOT = Path(__file__).resolve().parent
@@ -72,6 +72,8 @@ class MonitorApp:
         self._refresh_loop()
 
     def _build_layout(self) -> None:
+        self.root.configure(bg="#f6f8fb")
+
         top = Frame(self.root)
         top.pack(fill=BOTH, padx=12, pady=12)
 
@@ -89,14 +91,42 @@ class MonitorApp:
         Button(btns, text="开始：仅下载bag", command=lambda: self.start_mode("download")).pack(side=LEFT, padx=6)
         Button(btns, text="开始：解码图片（删除bag）", command=lambda: self.start_mode("decode_cleanup")).pack(side=LEFT, padx=6)
         Button(btns, text="开始：直接调用AI", command=lambda: self.start_mode("ai")).pack(side=LEFT, padx=6)
+        Button(btns, text="清空日志", command=self.clear_logs).pack(side=RIGHT, padx=6)
         Button(btns, text="停止当前任务", command=self.stop_mode).pack(side=RIGHT, padx=6)
 
-        self.log = Text(self.root, wrap="word")
-        self.log.pack(fill=BOTH, expand=True, padx=12, pady=8)
+        log_tools = Frame(self.root)
+        log_tools.pack(fill=X, padx=12, pady=(0, 2))
+
+        self.auto_scroll = StringVar(value="on")
+        Button(log_tools, text="日志置底", command=self.scroll_to_bottom).pack(side=LEFT, padx=(0, 6))
+        Button(log_tools, text="自动滚动：开/关", command=self.toggle_auto_scroll).pack(side=LEFT)
+
+        log_frame = Frame(self.root)
+        log_frame.pack(fill=BOTH, expand=True, padx=12, pady=(2, 8))
+        self.log = Text(log_frame, wrap="word")
+        self.log.pack(side=LEFT, fill=BOTH, expand=True)
+
+        y_scroll = Scrollbar(log_frame, orient="vertical", command=self.log.yview)
+        y_scroll.pack(side=RIGHT, fill=Y)
+        self.log.configure(yscrollcommand=y_scroll.set)
 
     def _append_log(self, msg: str) -> None:
         self.log.insert(END, msg + "\n")
+        if self.auto_scroll.get() == "on":
+            self.log.see(END)
+
+    def clear_logs(self) -> None:
+        self.log.delete("1.0", END)
+        self._append_log("[INFO] 日志已清空。")
+
+    def scroll_to_bottom(self) -> None:
         self.log.see(END)
+
+    def toggle_auto_scroll(self) -> None:
+        next_status = "off" if self.auto_scroll.get() == "on" else "on"
+        self.auto_scroll.set(next_status)
+        status = "开启" if next_status == "on" else "关闭"
+        self._append_log(f"[INFO] 自动滚动已{status}。")
 
     def _build_cmd(self, mode: str) -> list[str]:
         cmd = ["python", "workflow.py", "--config", str(self.config_path)]
