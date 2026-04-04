@@ -360,6 +360,7 @@ class RowWorkflow:
         return task_meta
 
     def _run_ai_only_task_worker(self, row_meta: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+        _t_start = time.monotonic()
         task_id = task.get("task_id")
         row_dir = self.output_root / row_meta["row_id"]
         task_dir = row_dir / str(task_id)
@@ -372,6 +373,8 @@ class RowWorkflow:
                 "status": "failed",
                 "error": "missing task_id",
                 "task_dir": str(task_dir),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "elapsed_sec": 0,
             }
         if not task_meta_path.exists():
             return {
@@ -380,9 +383,12 @@ class RowWorkflow:
                 "status": "failed",
                 "error": f"missing task_meta: {task_meta_path}",
                 "task_dir": str(task_dir),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "elapsed_sec": 0,
             }
 
         task_meta = self._load_json(task_meta_path)
+        task_meta["started_at"] = datetime.now(timezone.utc).isoformat()
         manifest_path = task_dir / "manifest.json"
         if not manifest_path.exists():
             task_meta.update({
@@ -590,6 +596,8 @@ class RowWorkflow:
             "analysis": row_summary.get("analysis"),
             "row_summary_path": str(row_dir / "row_summary.json"),
             "cleanup": row_summary.get("cleanup"),
+            "stage_stats": row_summary.get("stage_stats"),
+            "timing": row_summary.get("timing"),
         }
 
     @staticmethod
