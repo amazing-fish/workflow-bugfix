@@ -11,6 +11,7 @@ from bag import DIBagDownloader
 from frame import MultiFrameDecoder
 from ai_runner import WorkflowAIProcessor
 from preflight import run_preflight, format_preflight
+from writeback import run_writeback
 
 
 class RowWorkflow:
@@ -616,6 +617,7 @@ def parse_args():
     parser.add_argument("--ai-only", action="store_true", help="仅执行 AI（基于已存在 manifest/图片）")
     parser.add_argument("--force-delete-bags", action="store_true", help="执行完 row 后强制删除 bag（覆盖 config.cleanup.delete_bags_after_row）")
     parser.add_argument("--row-dir", help="仅对单个 row_dir 执行解码 + AI")
+    parser.add_argument("--writeback-only", action="store_true", help="仅执行 Excel 回填（基于已有 row_summary）")
     return parser.parse_args()
 
 
@@ -638,9 +640,13 @@ def main():
 
     wf = RowWorkflow(args.config, force_delete_bags=args.force_delete_bags)
     try:
-        enabled_modes = [args.download_only, args.decode_only, args.ai_only]
+        enabled_modes = [args.download_only, args.decode_only, args.ai_only, args.writeback_only]
         if sum(1 for x in enabled_modes if x) > 1:
             raise ValueError("--download-only / --decode-only / --ai-only 只能选择一个")
+
+        if args.writeback_only:
+            run_writeback(args.config)
+            return
 
         if args.download_only:
             wf.run_download()
@@ -658,6 +664,10 @@ def main():
             return
 
         wf.run_pipeline()
+        try:
+            run_writeback(args.config)
+        except Exception as e:
+            print(f"[WARN] Excel 回填失败: {e}")
     finally:
         wf.close()
 
