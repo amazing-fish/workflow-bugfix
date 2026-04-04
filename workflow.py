@@ -114,6 +114,9 @@ class RowWorkflow:
                         "target_ts": task.get("target_ts"),
                         "status": "worker_failed",
                         "error": str(e),
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "elapsed_sec": 0,
                     }
                 row_state["results"].append(result)
                 row_state["pending"] -= 1
@@ -194,6 +197,9 @@ class RowWorkflow:
                         "status": "worker_failed",
                         "error": str(e),
                         "task_dir": str(row_dir / str(task.get("task_id"))),
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "elapsed_sec": 0,
                     }
                 row_state["results"].append(result)
                 row_state["pending"] -= 1
@@ -273,6 +279,9 @@ class RowWorkflow:
                         "target_ts": task.get("target_ts"),
                         "status": "worker_failed",
                         "error": str(e),
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "elapsed_sec": 0,
                     }
                 row_state["results"].append(result)
                 row_state["pending"] -= 1
@@ -374,6 +383,7 @@ class RowWorkflow:
                 "error": "missing task_id",
                 "task_dir": str(task_dir),
                 "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": datetime.now(timezone.utc).isoformat(),
                 "elapsed_sec": 0,
             }
         if not task_meta_path.exists():
@@ -384,6 +394,7 @@ class RowWorkflow:
                 "error": f"missing task_meta: {task_meta_path}",
                 "task_dir": str(task_dir),
                 "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": datetime.now(timezone.utc).isoformat(),
                 "elapsed_sec": 0,
             }
 
