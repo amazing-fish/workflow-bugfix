@@ -445,8 +445,10 @@ class RowWorkflow:
             task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
             task_meta.pop("error", None)
         except Exception as e:
-            task_meta["status"] = "failed"
+            task_meta["status"] = "ai_failed"
             task_meta["error"] = str(e)
+            task_meta["failure_stage"] = "ai"
+            task_meta["reason"] = str(e)[:200]
         task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
         task_meta["elapsed_sec"] = round(time.monotonic() - _t_start, 2)
         return task_meta
@@ -533,7 +535,7 @@ class RowWorkflow:
         row_meta["tasks"] = updated_tasks
 
         total_tasks = len(results)
-        ok_tasks = sum(1 for r in results if r.get("status") == "completed")
+        ok_tasks = sum(1 for r in results if r.get("status") in ("completed", "decoded", "decode_partial"))
         failed_tasks = total_tasks - ok_tasks
         status = "completed" if total_tasks > 0 and failed_tasks == 0 else "partial_failed"
 

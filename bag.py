@@ -121,7 +121,7 @@ class DIBagDownloader:
                 yield {
                     "excel_row": excel_row,
                     "row_id": f"row{excel_row}",
-                    "status": "failed",
+                    "status": "download_failed",
                     "failure_stage": "download",
                     "reason": "download_failed",
                     "error": str(e),
