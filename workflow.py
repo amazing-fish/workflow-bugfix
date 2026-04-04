@@ -68,6 +68,8 @@ class RowWorkflow:
         return {"row_dir": str(row_dir), "status": row_summary["status"], "summary": row_summary}
 
     def run_decode_for_all_rows(self) -> dict[str, Any]:
+        wf_started = datetime.now(timezone.utc).isoformat()
+        wf_t0 = time.monotonic()
         if not self.output_root.exists():
             raise FileNotFoundError(f"输出目录不存在: {self.output_root}")
         row_dirs = [
@@ -139,6 +141,8 @@ class RowWorkflow:
         return summary
 
     def run_ai_for_all_rows(self) -> dict[str, Any]:
+        wf_started = datetime.now(timezone.utc).isoformat()
+        wf_t0 = time.monotonic()
         if self.ai_processor is None:
             raise RuntimeError("config.ai.enabled=false，无法执行仅 AI 模式")
         if not self.output_root.exists():
@@ -318,6 +322,8 @@ class RowWorkflow:
 
         if target_ts is None:
             task_meta["status"] = "missing_target_ts"
+            task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
+            task_meta["elapsed_sec"] = round(time.monotonic() - _t_start, 2)
             return task_meta
 
         decoder_cfg = self._build_decoder_config_for_task(row_meta, float(target_ts), frames_out_dir)
@@ -349,6 +355,8 @@ class RowWorkflow:
             task_meta["error"] = str(e)
             print(f"[ERROR] {row_meta['row_id']}/{task_id} 失败: {e}")
 
+        task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
+        task_meta["elapsed_sec"] = round(time.monotonic() - _t_start, 2)
         return task_meta
 
     def _run_ai_only_task_worker(self, row_meta: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
@@ -381,6 +389,8 @@ class RowWorkflow:
                 "status": "failed",
                 "error": f"missing manifest: {manifest_path}",
             })
+            task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
+            task_meta["elapsed_sec"] = round(time.monotonic() - _t_start, 2)
             return task_meta
 
         row_id = row_meta.get("row_id") or row_dir.name
@@ -397,6 +407,8 @@ class RowWorkflow:
         except Exception as e:
             task_meta["status"] = "failed"
             task_meta["error"] = str(e)
+        task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
+        task_meta["elapsed_sec"] = round(time.monotonic() - _t_start, 2)
         return task_meta
 
     # ---------------- helpers ----------------
@@ -537,7 +549,7 @@ class RowWorkflow:
                 fail_stage_dist.append("decode")
                 continue
             stages["decode"]["ok"] += 1
-            if ai_status == "completed":
+            if ai_status in ("completed", "ok"):
                 stages["ai"]["ok"] += 1
             elif ai_status in ("failed", "partial_failed"):
                 stages["ai"]["fail"] += 1
