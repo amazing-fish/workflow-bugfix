@@ -335,7 +335,9 @@ class RowWorkflow:
         }
 
         if target_ts is None:
-            task_meta["status"] = "missing_target_ts"
+            task_meta["status"] = "ts_failed"
+            task_meta["failure_stage"] = "timestamp"
+            task_meta["reason"] = "missing_target_ts"
             task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
             task_meta["elapsed_sec"] = round(time.monotonic() - _t_start, 2)
             return task_meta
@@ -537,7 +539,7 @@ class RowWorkflow:
         total_tasks = len(results)
         ok_tasks = sum(1 for r in results if r.get("status") in ("completed", "decoded", "decode_partial"))
         failed_tasks = total_tasks - ok_tasks
-        status = "completed" if total_tasks > 0 and failed_tasks == 0 else "partial_failed"
+        status = "completed" if total_tasks > 0 and failed_tasks == 0 else ("failed" if ok_tasks == 0 else "partial_failed")
 
         # Row 级失败归因
         STAGE_PRIORITY = {"download": 0, "timestamp": 1, "decode": 2, "upload": 3, "inference": 4, "ai": 5, "runtime": 6, "cleanup": 7}
@@ -593,7 +595,12 @@ class RowWorkflow:
 
     @staticmethod
     def _compute_stage_stats(results: list[dict[str, Any]]) -> dict[str, Any]:
-        stages = {"download": {"ok": 0, "fail": 0}, "decode": {"ok": 0, "fail": 0}, "ai": {"ok": 0, "fail": 0, "skipped": 0}}
+        stages = {
+            "timestamp": {"ok": 0, "fail": 0},
+            "download": {"ok": 0, "fail": 0},
+            "decode": {"ok": 0, "fail": 0},
+            "ai": {"ok": 0, "fail": 0, "skipped": 0},
+        }
         fail_stage_dist: list[str] = []
         for r in results:
             status = r.get("status", "")
@@ -603,14 +610,28 @@ class RowWorkflow:
                 fail_stage_dist.append("download")
                 continue
             stages["download"]["ok"] += 1
-            if status in ("decode_failed", "worker_failed", "missing_target_ts"):
+            if status in ("ts_failed", "missing_target_ts"):
+                stages["timestamp"]["fail"] += 1
+                fail_stage_dist.append("timestamp")
+                continue
+            stages["timestamp"]["ok"] += 1
+            if status in ("decode_failed", "worker_failed"):
                 stages["decode"]["fail"] += 1
                 fail_stage_dist.append("decode")
                 continue
-            stages["decode"]["ok"] += 1
+            if status in ("decoded", "decode_partial"):
+                stages["decode"]["ok"] += 1
+            elif status == "completed":
+                stages["decode"]["ok"] += 1
+            if status in ("decoded", "decode_partial"):
+                stages["ai"]["skipped"] += 1
+                continue
             if ai_status in ("completed", "ok"):
                 stages["ai"]["ok"] += 1
-            elif ai_status in ("failed", "partial_failed"):
+            elif ai_status in ("failed", "partial_failed", "ai_failed"):
+                stages["ai"]["fail"] += 1
+                fail_stage_dist.append("ai")
+            elif status == "ai_failed":
                 stages["ai"]["fail"] += 1
                 fail_stage_dist.append("ai")
             elif ai_status is None:
@@ -633,6 +654,8 @@ class RowWorkflow:
                 "status": item.get("status"),
                 "ai_status": (item.get("ai") or {}).get("status") if isinstance(item.get("ai"), dict) else None,
                 "error": item.get("error"),
+                "failure_stage": item.get("failure_stage"),
+                "reason": item.get("reason"),
                 "task_summary_path": str(Path(task_dir) / "task_meta.json") if task_dir else None,
             })
         return summaries
