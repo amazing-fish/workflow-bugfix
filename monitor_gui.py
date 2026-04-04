@@ -149,7 +149,9 @@ class MonitorApp:
         if self.proc is not None and self.proc.poll() is None:
             self._append_log("[WARN] 已有任务在运行，请先停止。")
             return
-        preflight_result = run_preflight(self.config_path)
+        _preflight_mode_map = {"full": "full", "download": "download-only", "decode_delete": "decode-only", "ai": "ai-only"}
+        preflight_mode = _preflight_mode_map.get(mode, "full")
+        preflight_result = run_preflight(self.config_path, mode=preflight_mode)
         for line in format_preflight(preflight_result).split("
 "):
             self._append_log(line)

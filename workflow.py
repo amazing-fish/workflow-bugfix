@@ -621,11 +621,20 @@ def parse_args():
 
 def main():
     args = parse_args()
-    preflight_result = run_preflight(args.config)
+    preflight_mode = "full"
+    if args.download_only:
+        preflight_mode = "download-only"
+    elif args.decode_only:
+        preflight_mode = "decode-only"
+    elif args.ai_only:
+        preflight_mode = "ai-only"
+    elif getattr(args, "writeback_only", False):
+        preflight_mode = "writeback-only"
+    preflight_result = run_preflight(args.config, mode=preflight_mode)
     print(format_preflight(preflight_result))
     if not preflight_result["passed"]:
         print("[FATAL] 预检未通过，请修复上述问题后重试。")
-        return
+        raise SystemExit(1)
 
     wf = RowWorkflow(args.config, force_delete_bags=args.force_delete_bags)
     try:
