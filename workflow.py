@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -121,7 +123,12 @@ class RowWorkflow:
                     print(f"[INFO] {row_id} 全部 task 完成")
 
         all_rows_summary.sort(key=lambda x: str(x.get("row_dir", "")))
+        wf_finished = datetime.now(timezone.utc).isoformat()
+        wf_elapsed = round(time.monotonic() - wf_t0, 2)
         summary = {
+            "started_at": wf_started,
+            "finished_at": wf_finished,
+            "elapsed_sec": wf_elapsed,
             "output_root": str(self.output_root),
             "total_rows": len(all_rows_summary),
             "completed_rows": sum(1 for row in all_rows_summary if row.get("status") == "completed"),
@@ -195,7 +202,12 @@ class RowWorkflow:
                     print(f"[INFO] {row_id} AI-only 全部 task 完成")
 
         row_summaries.sort(key=lambda x: str(x.get("row_dir", "")))
+        wf_finished = datetime.now(timezone.utc).isoformat()
+        wf_elapsed = round(time.monotonic() - wf_t0, 2)
         summary = {
+            "started_at": wf_started,
+            "finished_at": wf_finished,
+            "elapsed_sec": wf_elapsed,
             "output_root": str(self.output_root),
             "total_rows": len(row_summaries),
             "completed_rows": sum(1 for row in row_summaries if row.get("status") == "completed"),
@@ -207,6 +219,8 @@ class RowWorkflow:
         return summary
 
     def run_pipeline(self) -> dict[str, Any]:
+        wf_started = datetime.now(timezone.utc).isoformat()
+        wf_t0 = time.monotonic()
         downloader = DIBagDownloader(self.config_path)
         if self.ai_processor is not None:
             self.ai_processor.prepare()
@@ -267,7 +281,12 @@ class RowWorkflow:
                     print(f"[INFO] {row_id} 全部 task 完成")
 
         all_rows_summary.sort(key=lambda x: str(x.get("row_dir", "")))
+        wf_finished = datetime.now(timezone.utc).isoformat()
+        wf_elapsed = round(time.monotonic() - wf_t0, 2)
         summary = {
+            "started_at": wf_started,
+            "finished_at": wf_finished,
+            "elapsed_sec": wf_elapsed,
             "output_root": str(self.output_root),
             "total_rows": len(all_rows_summary),
             "completed_rows": sum(1 for row in all_rows_summary if row.get("status") == "completed"),
@@ -280,6 +299,8 @@ class RowWorkflow:
     # ---------------- worker ----------------
 
     def _process_task_worker(self, row_meta: dict[str, Any], task: dict[str, Any], run_ai: bool = True) -> dict[str, Any]:
+        _t_start = time.monotonic()
+        _t_start_wall = datetime.now(timezone.utc).isoformat()
         task_id = task["task_id"]
         target_ts = task.get("target_ts")
         row_dir = self.output_root / row_meta["row_id"]
@@ -292,6 +313,7 @@ class RowWorkflow:
             "target_ts": float(target_ts) if target_ts is not None else None,
             "status": "pending",
             "task_dir": str(task_dir),
+            "started_at": _t_start_wall,
         }
 
         if target_ts is None:
@@ -464,6 +486,9 @@ class RowWorkflow:
         status = "completed" if total_tasks > 0 and failed_tasks == 0 else "partial_failed"
         row_analysis = self._build_row_analysis(row_meta, results)
 
+        stage_stats = self._compute_stage_stats(results)
+        elapsed_list = [r.get("elapsed_sec") for r in results if r.get("elapsed_sec") is not None]
+
         row_summary = {
             "row_id": row_meta.get("row_id"),
             "excel_row": row_meta.get("excel_row"),
@@ -471,6 +496,12 @@ class RowWorkflow:
             "total_tasks": total_tasks,
             "ok_tasks": ok_tasks,
             "failed_tasks": failed_tasks,
+            "stage_stats": stage_stats,
+            "timing": {
+                "avg_task_sec": round(sum(elapsed_list) / len(elapsed_list), 2) if elapsed_list else None,
+                "max_task_sec": round(max(elapsed_list), 2) if elapsed_list else None,
+                "min_task_sec": round(min(elapsed_list), 2) if elapsed_list else None,
+            },
             "analysis": row_analysis,
             "task_summaries": self._build_row_task_summaries(results),
         }
@@ -488,6 +519,36 @@ class RowWorkflow:
         print(f"[INFO] {row_analysis['count_line']}")
         print(f"[INFO] {row_analysis['row_key']} 保留样本: {row_analysis['retained_line']}")
         return row_summary
+
+    @staticmethod
+    def _compute_stage_stats(results: list[dict[str, Any]]) -> dict[str, Any]:
+        stages = {"download": {"ok": 0, "fail": 0}, "decode": {"ok": 0, "fail": 0}, "ai": {"ok": 0, "fail": 0, "skipped": 0}}
+        fail_stage_dist: list[str] = []
+        for r in results:
+            status = r.get("status", "")
+            ai_status = (r.get("ai") or {}).get("status") if isinstance(r.get("ai"), dict) else r.get("ai_status")
+            if status == "download_failed":
+                stages["download"]["fail"] += 1
+                fail_stage_dist.append("download")
+                continue
+            stages["download"]["ok"] += 1
+            if status in ("decode_failed", "worker_failed", "missing_target_ts"):
+                stages["decode"]["fail"] += 1
+                fail_stage_dist.append("decode")
+                continue
+            stages["decode"]["ok"] += 1
+            if ai_status == "completed":
+                stages["ai"]["ok"] += 1
+            elif ai_status in ("failed", "partial_failed"):
+                stages["ai"]["fail"] += 1
+                fail_stage_dist.append("ai")
+            elif ai_status is None:
+                stages["ai"]["skipped"] += 1
+        for key in stages:
+            total = stages[key]["ok"] + stages[key]["fail"] + stages[key].get("skipped", 0)
+            stages[key]["total"] = total
+            stages[key]["success_rate"] = round(stages[key]["ok"] / total, 2) if total > 0 else None
+        return {"stages": stages, "fail_stage_distribution": fail_stage_dist}
 
     @staticmethod
     def _build_row_task_summaries(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
