@@ -37,6 +37,15 @@ def determine_row_result(row_summary: dict[str, Any]) -> tuple[str, str]:
             failed_stages.append("解码失败")
         elif ai_status in ("failed", "partial_failed"):
             failed_stages.append("AI推理失败")
+        elif task_status == "failed":
+            # 通用 failed：根据是否有 decode 产物推断失败阶段
+            error_msg = str(task.get("error", ""))
+            if any(k in error_msg for k in ("ffmpeg", "rosbag", "decode", "bag")):
+                failed_stages.append("解码失败")
+            elif any(k in error_msg for k in ("ai", "API", "http", "timeout", "SSE")):
+                failed_stages.append("AI推理失败")
+            else:
+                failed_stages.append("运行失败")
 
     has_valid_results = (yes_count + suspected_count + no_count) > 0
 
@@ -108,9 +117,30 @@ def run_writeback(config_path: str | Path) -> dict[str, Any]:
 
     # 收集所有 row_summary
     results: list[dict[str, Any]] = []
+    processed_excel_rows: set[int] = set()
     if not output_root.exists():
         print(f"[WARN] 输出目录不存在: {output_root}")
         return {"written": 0, "results": results}
+
+    # 先扫描 download_summary，补充下载阶段就失败的 row
+    dl_summary_path = output_root / "download_summary.json"
+    if dl_summary_path.exists():
+        with open(dl_summary_path, "r", encoding="utf-8") as f:
+            dl_summary = json.load(f)
+        for dl_row in dl_summary.get("rows", []):
+            if dl_row.get("status") == "downloaded":
+                continue
+            excel_row = dl_row.get("excel_row")
+            if excel_row is None:
+                continue
+            excel_row = int(excel_row)
+            ws.cell(row=excel_row, column=result_col, value="failed")
+            reason = dl_row.get("error") or "下载失败"
+            ws.cell(row=excel_row, column=reason_col, value=reason)
+            processed_excel_rows.add(excel_row)
+            entry = {"row_dir": None, "excel_row": excel_row, "result": "failed", "reason": reason}
+            results.append(entry)
+            print(f"[WRITEBACK] row={excel_row} result=failed reason={reason}")
 
     for row_dir in sorted(output_root.iterdir()):
         if not row_dir.is_dir():
@@ -130,6 +160,9 @@ def run_writeback(config_path: str | Path) -> dict[str, Any]:
 
         if excel_row is None:
             print(f"[WARN] {row_dir.name}: 无法确定 excel_row，跳过回填")
+            continue
+
+        if int(excel_row) in processed_excel_rows:
             continue
 
         if summary_path.exists():
