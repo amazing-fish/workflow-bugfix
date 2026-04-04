@@ -6,6 +6,7 @@ import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
+from preflight import run_preflight, format_preflight
 from tkinter import BOTH, END, LEFT, RIGHT, X, Y, Button, Frame, Label, Scrollbar, StringVar, Text, Tk
 
 
@@ -147,6 +148,15 @@ class MonitorApp:
     def start_mode(self, mode: str) -> None:
         if self.proc is not None and self.proc.poll() is None:
             self._append_log("[WARN] 已有任务在运行，请先停止。")
+            return
+        _preflight_mode_map = {"pipeline": "full", "download": "download-only", "decode_cleanup": "decode-only", "ai": "ai-only"}
+        preflight_mode = _preflight_mode_map.get(mode, "full")
+        preflight_result = run_preflight(self.config_path, mode=preflight_mode)
+        for line in format_preflight(preflight_result).split("
+"):
+            self._append_log(line)
+        if not preflight_result["passed"]:
+            self._append_log("[FATAL] 预检未通过，请修复上述问题后重试。")
             return
         cmd = self._build_cmd(mode)
         self._append_log(f"[CMD] {' '.join(cmd)}")
