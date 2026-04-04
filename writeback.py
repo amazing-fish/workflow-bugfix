@@ -17,52 +17,31 @@ def determine_row_result(row_summary: dict[str, Any]) -> tuple[str, str]:
       reason: 失败阶段描述，无失败时为空字符串
     """
     status = row_summary.get("status", "")
-    tasks = row_summary.get("tasks", [])
+    task_summaries = row_summary.get("task_summaries", [])
     analysis = row_summary.get("analysis", {})
 
-    if not tasks:
-        return "failed", "无任务数据"
+    # 优先从 row_summary.analysis.counts 获取聚合结果
+    row_counts = analysis.get("counts", {})
+    yes_count = int(row_counts.get("yes", 0))
+    suspected_count = int(row_counts.get("suspected", 0))
+    no_count = int(row_counts.get("no", 0))
 
-    # 收集失败信息
+    # 从 task_summaries 收集失败阶段信息
     failed_stages: list[str] = []
-    yes_count = 0
-    suspected_count = 0
-    no_count = 0
-    valid_tasks = 0
-
-    for task in tasks:
+    for task in task_summaries:
         task_status = task.get("status", "")
         ai_status = task.get("ai_status")
-
         if task_status in ("download_failed",):
             failed_stages.append("下载失败")
-            continue
-        if task_status in ("decode_failed", "worker_failed"):
+        elif task_status in ("decode_failed", "worker_failed", "missing_target_ts"):
             failed_stages.append("解码失败")
-            continue
-        if ai_status in ("failed", "partial_failed"):
+        elif ai_status in ("failed", "partial_failed"):
             failed_stages.append("AI推理失败")
 
-        # 从 analysis 或 task 级数据提取碰撞统计
-        task_analysis = task.get("analysis", {})
-        counts = task_analysis.get("counts", {})
-        yes_count += int(counts.get("yes", 0))
-        suspected_count += int(counts.get("suspected", 0))
-        no_count += int(counts.get("no", 0))
-        if counts:
-            valid_tasks += 1
-
-    # 也尝试从 row_summary 顶层 analysis 获取
-    if valid_tasks == 0 and analysis:
-        row_counts = analysis.get("counts", {})
-        yes_count = int(row_counts.get("yes", 0))
-        suspected_count = int(row_counts.get("suspected", 0))
-        no_count = int(row_counts.get("no", 0))
-        if yes_count + suspected_count + no_count > 0:
-            valid_tasks = 1
+    has_valid_results = (yes_count + suspected_count + no_count) > 0
 
     # 判定结果
-    if valid_tasks == 0:
+    if not has_valid_results:
         reason = "; ".join(sorted(set(failed_stages))) if failed_stages else "全部任务失败"
         return "failed", reason
 

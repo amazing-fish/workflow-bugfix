@@ -11,6 +11,7 @@ from bag import DIBagDownloader
 from frame import MultiFrameDecoder
 from ai_runner import WorkflowAIProcessor
 from preflight import run_preflight, format_preflight
+from writeback import run_writeback
 
 
 class RowWorkflow:
