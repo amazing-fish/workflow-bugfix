@@ -146,7 +146,7 @@ def run_writeback(config_path: str | Path) -> dict[str, Any]:
             entry = {"row_dir": None, "excel_row": excel_row, "result": "failed", "reason": reason}
             results.append(entry)
             print(f"[WRITEBACK] row={excel_row} result=failed reason={reason}")
-        break  # 优先使用第一个找到的 summary
+        # 继续扫描下一个 summary，合并失败 row 后由 processed_excel_rows 去重
 
     for row_dir in sorted(output_root.iterdir()):
         if not row_dir.is_dir():
