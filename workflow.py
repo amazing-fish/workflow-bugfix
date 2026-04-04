@@ -113,6 +113,8 @@ class RowWorkflow:
                         "task_id": task.get("task_id"),
                         "target_ts": task.get("target_ts"),
                         "status": "worker_failed",
+                        "failure_stage": "runtime",
+                        "reason": str(e),
                         "error": str(e),
                         "started_at": datetime.now(timezone.utc).isoformat(),
                         "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -222,7 +224,8 @@ class RowWorkflow:
             "total_rows": len(row_summaries),
             "completed_rows": sum(1 for row in row_summaries if row.get("status") == "completed"),
             "failed_rows": sum(1 for row in row_summaries if row.get("status") != "completed"),
-            "mode": "ai-only",
+            "schema_version": "2.0",
+            "run_mode": "ai-only",
             "rows": row_summaries,
         }
         self._save_json(self.output_root / "workflow_summary.json", summary)
@@ -278,6 +281,8 @@ class RowWorkflow:
                         "task_id": task.get("task_id"),
                         "target_ts": task.get("target_ts"),
                         "status": "worker_failed",
+                        "failure_stage": "runtime",
+                        "reason": str(e),
                         "error": str(e),
                         "started_at": datetime.now(timezone.utc).isoformat(),
                         "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -340,14 +345,27 @@ class RowWorkflow:
 
         try:
             decode_result = MultiFrameDecoder(decoder_cfg).run()
+            ds = decode_result.get("summary", {})
+            ok_frames = ds.get("ok_frames", 0)
+            expected_frames = ds.get("expected_frames", ds.get("total_frames", 0))
+            if ok_frames == 0:
+                decode_status = "decode_failed"
+            elif ok_frames < expected_frames:
+                decode_status = "decode_partial"
+            else:
+                decode_status = "decoded"
+
             task_meta.update({
-                "status": "decoded",
+                "status": decode_status,
                 "manifest_path": decode_result["manifest_path"],
                 "frames_root": decode_result["out_dir"],
-                "decode_summary": decode_result.get("summary", {}),
+                "decode_summary": ds,
             })
+            if decode_status == "decode_failed":
+                task_meta["failure_stage"] = "decode"
+                task_meta["reason"] = "zero_frames_decoded"
 
-            if run_ai and self.ai_processor is not None:
+            if run_ai and self.ai_processor is not None and decode_status != "decode_failed":
                 print(f"[INFO] {row_meta['row_id']}/{task_id} 开始逐帧 AI")
                 ai_result = self.ai_processor.run_for_task_sequence(
                     row_meta=row_meta,
@@ -355,13 +373,18 @@ class RowWorkflow:
                     task_dir=task_dir,
                 )
                 task_meta["ai"] = self._compact_ai_result(ai_result)
-                task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
-            else:
-                task_meta["status"] = "completed"
+                if ai_result.get("status") == "ok":
+                    task_meta["status"] = "completed"
+                else:
+                    task_meta["status"] = "ai_partial_failed"
+                    task_meta["failure_stage"] = "ai"
+                    task_meta["reason"] = "partial_failed"
 
         except Exception as e:
             task_meta["status"] = "failed"
             task_meta["error"] = str(e)
+            task_meta["failure_stage"] = "decode" if "decode" not in task_meta else "ai"
+            task_meta["reason"] = str(e)
             print(f"[ERROR] {row_meta['row_id']}/{task_id} 失败: {e}")
 
         task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
@@ -513,6 +536,20 @@ class RowWorkflow:
         ok_tasks = sum(1 for r in results if r.get("status") == "completed")
         failed_tasks = total_tasks - ok_tasks
         status = "completed" if total_tasks > 0 and failed_tasks == 0 else "partial_failed"
+
+        # Row 级失败归因
+        STAGE_PRIORITY = {"download": 0, "timestamp": 1, "decode": 2, "upload": 3, "inference": 4, "ai": 5, "runtime": 6, "cleanup": 7}
+        failure_reasons = []
+        stage_counts = {}
+        for r in results:
+            fs = r.get("failure_stage")
+            reason = r.get("reason")
+            if fs:
+                stage_counts[fs] = stage_counts.get(fs, 0) + 1
+                if reason and reason not in failure_reasons:
+                    failure_reasons.append(reason)
+        primary_failure_stage = min(stage_counts, key=lambda s: STAGE_PRIORITY.get(s, 99)) if stage_counts else None
+        primary_failure_reason = failure_reasons[0] if failure_reasons else None
         row_analysis = self._build_row_analysis(row_meta, results)
 
         stage_stats = self._compute_stage_stats(results)
@@ -522,6 +559,9 @@ class RowWorkflow:
             "row_id": row_meta.get("row_id"),
             "excel_row": row_meta.get("excel_row"),
             "status": status,
+            "primary_failure_stage": primary_failure_stage,
+            "primary_failure_reason": primary_failure_reason,
+            "failure_reasons": failure_reasons,
             "total_tasks": total_tasks,
             "ok_tasks": ok_tasks,
             "failed_tasks": failed_tasks,

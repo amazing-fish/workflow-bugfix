@@ -428,6 +428,8 @@ class WorkflowAIProcessor:
                         "sample_index": sample_index,
                         "sample_name": sample_name,
                         "status": "ok" if schema_report.get("ok") else "schema_invalid",
+                        "failure_stage": None if schema_report.get("ok") else "inference",
+                        "reason": None if schema_report.get("ok") else "schema_invalid",
                         "collision_pred": collision_pred,
                         "none_retry_count": none_retry_count,
                         "retry_count": retry_count,
@@ -453,6 +455,8 @@ class WorkflowAIProcessor:
                         "sample_index": sample_index,
                         "sample_name": sample_name,
                         "status": "failed",
+                        "failure_stage": "upload" if "upload" in str(e).lower() else "inference",
+                        "reason": "upload_failed" if "upload" in str(e).lower() else "inference_failed",
                         "error": str(e),
                         "collision_pred": None,
                     }

@@ -40,9 +40,10 @@ def collect_task_stats(output_root: Path) -> dict:
         for task in meta.get("tasks", []):
             stats["total_tasks"] += 1
             status = task.get("status")
-            if status == "completed":
+            if status in ("completed", "decoded", "decode_partial"):
                 stats["completed"] += 1
-            elif status in {"failed", "worker_failed", "ai_partial_failed"}:
+            elif status in ("failed", "worker_failed", "ai_partial_failed",
+                            "decode_failed", "ai_failed", "ts_failed"):
                 stats["failed"] += 1
             else:
                 stats["pending"] += 1

@@ -122,6 +122,8 @@ class DIBagDownloader:
                     "excel_row": excel_row,
                     "row_id": f"row{excel_row}",
                     "status": "failed",
+                    "failure_stage": "download",
+                    "reason": "download_failed",
                     "error": str(e),
                 }
 
@@ -249,6 +251,8 @@ class DIBagDownloader:
         if not checker_text:
             return {
                 "status": "empty_checker_text",
+                "failure_stage": "timestamp",
+                "reason": "ts_not_found",
                 "checker_text": "",
                 "collision_ts": None,
                 "collision_ts_list": [],
@@ -260,6 +264,8 @@ class DIBagDownloader:
         if not matches:
             return {
                 "status": "collision_ts_not_found",
+                "failure_stage": "timestamp",
+                "reason": "ts_not_found",
                 "checker_text": checker_text,
                 "collision_ts": None,
                 "collision_ts_list": [],
@@ -288,6 +294,8 @@ class DIBagDownloader:
         if not dedup_values:
             return {
                 "status": "collision_ts_invalid",
+                "failure_stage": "timestamp",
+                "reason": "ts_invalid",
                 "checker_text": checker_text,
                 "collision_ts": None,
                 "collision_ts_list": [],
