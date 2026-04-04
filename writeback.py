@@ -122,25 +122,31 @@ def run_writeback(config_path: str | Path) -> dict[str, Any]:
         print(f"[WARN] 输出目录不存在: {output_root}")
         return {"written": 0, "results": results}
 
-    # 先扫描 download_summary，补充下载阶段就失败的 row
-    dl_summary_path = output_root / "download_summary.json"
-    if dl_summary_path.exists():
-        with open(dl_summary_path, "r", encoding="utf-8") as f:
-            dl_summary = json.load(f)
-        for dl_row in dl_summary.get("rows", []):
-            if dl_row.get("status") == "downloaded":
+    # 扫描 workflow_summary / download_summary，补充未生成 row_dir 的失败 row
+    for summary_name in ("workflow_summary.json", "download_summary.json"):
+        summary_path = output_root / summary_name
+        if not summary_path.exists():
+            continue
+        with open(summary_path, "r", encoding="utf-8") as f:
+            summary_data = json.load(f)
+        for row_entry in summary_data.get("rows", []):
+            row_status = row_entry.get("status", "")
+            if row_status in ("completed", "partial_failed", "downloaded"):
                 continue
-            excel_row = dl_row.get("excel_row")
+            excel_row = row_entry.get("excel_row")
             if excel_row is None:
                 continue
             excel_row = int(excel_row)
+            if excel_row in processed_excel_rows:
+                continue
             ws.cell(row=excel_row, column=result_col, value="failed")
-            reason = dl_row.get("error") or "下载失败"
+            reason = row_entry.get("error") or "下载失败"
             ws.cell(row=excel_row, column=reason_col, value=reason)
             processed_excel_rows.add(excel_row)
             entry = {"row_dir": None, "excel_row": excel_row, "result": "failed", "reason": reason}
             results.append(entry)
             print(f"[WRITEBACK] row={excel_row} result=failed reason={reason}")
+        break  # 优先使用第一个找到的 summary
 
     for row_dir in sorted(output_root.iterdir()):
         if not row_dir.is_dir():
