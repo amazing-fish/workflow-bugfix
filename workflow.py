@@ -135,6 +135,10 @@ class RowWorkflow:
         all_rows_summary.sort(key=lambda x: str(x.get("row_dir", "")))
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
+        task_results = [r for row_state in row_states.values() for r in row_state["results"]]
+        stage_stats = self._compute_stage_stats(task_results)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
+        stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,
             "finished_at": wf_finished,
@@ -145,10 +149,9 @@ class RowWorkflow:
             "failed_rows": sum(1 for row in all_rows_summary if row.get("status") != "completed"),
             "schema_version": "2.0",
             "run_mode": "full",
+            "stage_stats": stage_stats,
             "rows": all_rows_summary,
         }
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
-        summary.get("stage_stats", {}).get("retry_stats", {})["download"] = dl_retries_total
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
 
@@ -228,6 +231,10 @@ class RowWorkflow:
         row_summaries.sort(key=lambda x: str(x.get("row_dir", "")))
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
+        task_results = [r for row_state in row_states.values() for r in row_state["results"]]
+        stage_stats = self._compute_stage_stats(task_results)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in row_summaries)
+        stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,
             "finished_at": wf_finished,
@@ -238,10 +245,9 @@ class RowWorkflow:
             "failed_rows": sum(1 for row in row_summaries if row.get("status") != "completed"),
             "schema_version": "2.0",
             "run_mode": "ai-only",
+            "stage_stats": stage_stats,
             "rows": row_summaries,
         }
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in row_summaries)
-        summary.get("stage_stats", {}).get("retry_stats", {})["download"] = dl_retries_total
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
 
@@ -315,6 +321,10 @@ class RowWorkflow:
         all_rows_summary.sort(key=lambda x: str(x.get("row_dir", "")))
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
+        task_results = [r for row_state in row_states.values() for r in row_state["results"]]
+        stage_stats = self._compute_stage_stats(task_results)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
+        stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,
             "finished_at": wf_finished,
@@ -325,10 +335,9 @@ class RowWorkflow:
             "failed_rows": sum(1 for row in all_rows_summary if row.get("status") != "completed"),
             "schema_version": "2.0",
             "run_mode": "decode-only",
+            "stage_stats": stage_stats,
             "rows": all_rows_summary,
         }
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
-        summary.get("stage_stats", {}).get("retry_stats", {})["download"] = dl_retries_total
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
 

@@ -243,6 +243,7 @@ class DIBagDownloader:
             json.dump(row_meta, f, ensure_ascii=False, indent=2)
 
         print(f"[INFO] {row_id} 就绪: timestamps={len(tasks)}, row_meta={row_meta_path}")
+        download_retries = sum(max(0, s.get("attempts", 1) - 1) for s in download_stats)
         return {
             "excel_row": excel_row,
             "row_id": row_id,
@@ -250,6 +251,8 @@ class DIBagDownloader:
             "row_dir": str(row_dir),
             "row_meta_path": str(row_meta_path),
             "timestamp_count": len(tasks),
+            "download_stats": download_stats,
+            "download_retries": download_retries,
         }
 
     def _build_decode_tasks(self, collision_info: dict[str, Any]) -> list[dict[str, Any]]:
