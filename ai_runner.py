@@ -468,7 +468,7 @@ class WorkflowAIProcessor:
         retained_samples = self._build_retained_samples(sequence_results)
         analysis = self._build_task_analysis(row_meta, task_meta, aggregate, retained_samples)
         result = {
-            "status": "ok" if aggregate["failed_samples"] == 0 else "partial_failed",
+            "status": "ok" if aggregate["failed_samples"] == 0 else ("failed" if aggregate.get("valid_samples", 0) == 0 else "partial_failed"),
             "elapsed_sec": round(time.time() - started, 3),
             "sample_count": len(sample_names),
             "sequence_results": sequence_results,

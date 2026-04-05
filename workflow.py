@@ -456,7 +456,7 @@ class RowWorkflow:
                 task_dir=task_dir,
             )
             task_meta["ai"] = self._compact_ai_result(ai_result)
-            task_meta["status"] = "completed" if ai_result.get("status") == "ok" else "ai_partial_failed"
+            task_meta["status"] = {"ok": "completed", "partial_failed": "ai_partial_failed", "failed": "ai_failed"}.get(ai_result.get("status"), "ai_failed")
             task_meta.pop("error", None)
         except Exception as e:
             task_meta["status"] = "ai_failed"
