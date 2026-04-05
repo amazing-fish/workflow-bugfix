@@ -456,6 +456,9 @@ class RowWorkflow:
             )
             task_meta["ai"] = self._compact_ai_result(ai_result)
             task_meta["status"] = {"ok": "completed", "partial_failed": "ai_partial_failed", "failed": "ai_failed"}.get(ai_result.get("status"), "ai_failed")
+            if task_meta["status"] != "completed":
+                task_meta["failure_stage"] = "ai"
+                task_meta["reason"] = "ai_inference_error"
             task_meta.pop("error", None)
         except Exception as e:
             task_meta["status"] = "ai_failed"
