@@ -118,14 +118,20 @@ class DIBagDownloader:
                 yield self._process_one_row(excel_row, issue_link, checker_text)
             except Exception as e:
                 print(f"[ERROR] 第 {excel_row} 行处理失败: {e}")
-                yield {
+                row_id = f"row{excel_row}"
+                row_dir = self.output_root / row_id
+                result = {
                     "excel_row": excel_row,
-                    "row_id": f"row{excel_row}",
+                    "row_id": row_id,
                     "status": "download_failed",
                     "failure_stage": "download",
                     "reason": "download_failed",
                     "error": str(e),
                 }
+                if row_dir.exists():
+                    result["row_dir"] = str(row_dir)
+                    result["row_meta_path"] = str(row_dir / "row_meta.json")
+                yield result
 
     def load_row_meta(self, row_dir: str | Path) -> dict[str, Any]:
         row_dir = Path(row_dir)
@@ -146,33 +152,54 @@ class DIBagDownloader:
         row_dir = self.output_root / row_id
         row_dir.mkdir(parents=True, exist_ok=True)
 
-        bucket = self._extract_bucket_from_obs_path(dataset["transfer_path"])
-        obs_download_url = self._download_menu(bucket)
-
-        self._debug_print(f"[DEBUG] row={row_id} transfer_path={dataset['transfer_path']}")
-        self._debug_print(f"[DEBUG] row={row_id} bucket={bucket}")
-        self._debug_print(f"[DEBUG] row={row_id} obs_download_url={obs_download_url}")
-
         downloaded = {}
-        for topic in self.topics:
-            remote_path = self._build_topic_bag_path(
-                transfer_path=dataset["transfer_path"],
-                topic=topic,
-                add_slash_before_archive=dataset["add_slash_before_archive"],
-            )
-            obs_id = self._get_obs_id(
-                bucket=bucket,
-                remote_path=remote_path,
-                dataset_name=dataset.get("dataset_name"),
-            )
-            local_bag_path = self._download_by_obs_id(
-                obs_download_url=obs_download_url,
-                obs_id=obs_id,
-                save_dir=row_dir,
-                save_name=f"{topic}.bag",
-            )
-            downloaded[topic] = str(local_bag_path)
-            print(f"[OK] {row_id} 下载完成 {topic} -> {local_bag_path}")
+        try:
+            bucket = self._extract_bucket_from_obs_path(dataset["transfer_path"])
+            obs_download_url = self._download_menu(bucket)
+
+            self._debug_print(f"[DEBUG] row={row_id} transfer_path={dataset['transfer_path']}")
+            self._debug_print(f"[DEBUG] row={row_id} bucket={bucket}")
+            self._debug_print(f"[DEBUG] row={row_id} obs_download_url={obs_download_url}")
+
+            for topic in self.topics:
+                remote_path = self._build_topic_bag_path(
+                    transfer_path=dataset["transfer_path"],
+                    topic=topic,
+                    add_slash_before_archive=dataset["add_slash_before_archive"],
+                )
+                obs_id = self._get_obs_id(
+                    bucket=bucket,
+                    remote_path=remote_path,
+                    dataset_name=dataset.get("dataset_name"),
+                )
+                local_bag_path = self._download_by_obs_id(
+                    obs_download_url=obs_download_url,
+                    obs_id=obs_id,
+                    save_dir=row_dir,
+                    save_name=f"{topic}.bag",
+                )
+                downloaded[topic] = str(local_bag_path)
+                print(f"[OK] {row_id} 下载完成 {topic} -> {local_bag_path}")
+        except Exception as e:
+            row_meta = {
+                "excel_row": excel_row,
+                "row_id": row_id,
+                "issue_link": issue_link,
+                "locator": locator,
+                "dataset": dataset,
+                "collision": collision_info,
+                "downloaded": downloaded,
+                "tasks": [],
+                "status": "download_failed",
+                "failure_stage": "download",
+                "reason": "download_error",
+                "error": str(e),
+            }
+            row_meta_path = row_dir / "row_meta.json"
+            with open(row_meta_path, "w", encoding="utf-8") as f:
+                json.dump(row_meta, f, ensure_ascii=False, indent=2)
+            print(f"[WARN] {row_id} 下载失败，已写入失败态 row_meta: {row_meta_path}")
+            raise
 
         tasks = self._build_decode_tasks(collision_info)
         row_meta = {
