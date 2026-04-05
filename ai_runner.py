@@ -336,7 +336,8 @@ class WorkflowAIProcessor:
 
         with self._build_client() as client:
             for sample_index, sample_name in enumerate(sample_names, start=1):
-                sample_dir = task_dir / sample_name
+                dir_name = "center" if sample_name == "__center__" else sample_name
+                sample_dir = task_dir / dir_name
                 ai_dir = sample_dir / "ai"
                 ai_dir.mkdir(parents=True, exist_ok=True)
                 try:
@@ -534,13 +535,7 @@ class WorkflowAIProcessor:
         if mode == "sample_sequence_per_camera":
             return samples
         if mode == "center_frame_per_camera":
-            for _, bag_info in bags.items():
-                cs = bag_info.get("center_sample")
-                if cs:
-                    return [cs]
-            before_frames = int(manifest.get("before_frames", 4))
-            center_no = before_frames + 1
-            return [f"sample{center_no:02d}"]
+            return ["__center__"]
         if mode == "sample_name_per_camera":
             sample_names = list(self.selection_cfg.get("sample_names", []))
             return sample_names
@@ -549,10 +544,14 @@ class WorkflowAIProcessor:
     def _collect_images_for_sample(self, manifest: dict[str, Any], sample_name: str) -> list[Path]:
         bags = manifest.get("bags", {})
         selected: list[Path] = []
+        is_center_mode = sample_name == "__center__"
         for camera_name in sorted(bags.keys()):
             info = bags[camera_name]
+            target = info.get("center_sample") if is_center_mode else sample_name
+            if not target:
+                continue
             for frame in info.get("frames", []):
-                if frame.get("status") == "ok" and frame.get("sample") == sample_name:
+                if frame.get("status") == "ok" and frame.get("sample") == target:
                     image_path = frame.get("image_path")
                     if image_path:
                         selected.append(Path(image_path))
