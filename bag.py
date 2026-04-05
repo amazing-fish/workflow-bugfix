@@ -181,7 +181,6 @@ class DIBagDownloader:
                 downloaded[topic] = str(local_bag_path)
                 print(f"[OK] {row_id} 下载完成 {topic} -> {local_bag_path}")
         except Exception as e:
-            tasks = self._build_decode_tasks(collision_info)
             row_meta = {
                 "excel_row": excel_row,
                 "row_id": row_id,
@@ -190,7 +189,7 @@ class DIBagDownloader:
                 "dataset": dataset,
                 "collision": collision_info,
                 "downloaded": downloaded,
-                "tasks": tasks,
+                "tasks": [],
                 "status": "download_failed",
                 "failure_stage": "download",
                 "reason": "download_error",

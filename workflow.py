@@ -86,6 +86,9 @@ class RowWorkflow:
             for row_dir in row_dirs:
                 row_meta = self._load_json(row_dir / "row_meta.json")
                 row_id = row_meta.get("row_id") or row_dir.name
+                if row_meta.get("status") == "download_failed":
+                    print(f"[INFO] {row_id} 下载失败，跳过解码")
+                    continue
                 tasks = list(row_meta.get("tasks") or [])
                 row_states[row_id] = {
                     "row_dir": row_dir,
@@ -170,6 +173,9 @@ class RowWorkflow:
             for row_dir in row_dirs:
                 row_meta = self._load_json(row_dir / "row_meta.json")
                 row_id = row_meta.get("row_id") or row_dir.name
+                if row_meta.get("status") == "download_failed":
+                    print(f"[INFO] {row_id} 下载失败，跳过 AI")
+                    continue
                 tasks = list(row_meta.get("tasks") or [])
                 row_states[row_id] = {
                     "row_dir": row_dir,
