@@ -672,7 +672,23 @@ class RowWorkflow:
             total = stages[key]["ok"] + stages[key]["fail"] + stages[key].get("skipped", 0)
             stages[key]["total"] = total
             stages[key]["success_rate"] = round(stages[key]["ok"] / total, 2) if total > 0 else None
-        return {"stages": stages, "fail_stage_distribution": fail_stage_dist}
+
+        retry_stats = {"download": 0, "decode": 0, "ai": 0}
+        for r in results:
+            ds = r.get("decode_summary")
+            if isinstance(ds, dict):
+                retry_stats["decode"] += int(ds.get("decode_retries", 0))
+            ai = r.get("ai")
+            if isinstance(ai, dict):
+                agg = ai.get("aggregate")
+                if isinstance(agg, dict):
+                    retry_stats["ai"] += int(agg.get("total_retry_count", 0))
+
+        return {
+            "stages": stages,
+            "fail_stage_distribution": fail_stage_dist,
+            "retry_stats": retry_stats,
+        }
 
     @staticmethod
     def _build_row_task_summaries(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
