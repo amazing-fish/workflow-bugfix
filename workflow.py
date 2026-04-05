@@ -139,7 +139,7 @@ class RowWorkflow:
         download_failed_rows = [r for r in all_rows_summary if r.get("status") == "download_failed"]
         all_results_for_stats = task_results + download_failed_rows
         stage_stats = self._compute_stage_stats(all_results_for_stats)
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary + download_failed_rows)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
         stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,
@@ -237,7 +237,7 @@ class RowWorkflow:
         download_failed_rows = [r for r in row_summaries if r.get("status") == "download_failed"]
         all_results_for_stats = task_results + download_failed_rows
         stage_stats = self._compute_stage_stats(all_results_for_stats)
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in row_summaries + download_failed_rows)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in row_summaries)
         stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,
@@ -329,7 +329,7 @@ class RowWorkflow:
         download_failed_rows = [r for r in all_rows_summary if r.get("status") == "download_failed"]
         all_results_for_stats = task_results + download_failed_rows
         stage_stats = self._compute_stage_stats(all_results_for_stats)
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary + download_failed_rows)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
         stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,
