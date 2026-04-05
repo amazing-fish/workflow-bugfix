@@ -791,7 +791,7 @@ class WorkflowAIProcessor:
                 suspected_count += 1
                 valid_samples += 1
             else:
-                if status == "failed":
+                if status in ("failed", "ai_failed", "schema_invalid"):
                     failed_samples += 1
             result_sequence.append(compact_label or pred)
             detailed_sequence.append({
