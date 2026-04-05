@@ -370,11 +370,16 @@ class MultiFrameDecoder:
                 "total_frames": bag_total_frames,
             }
 
+        expected_frames_per_bag = manifest.get("total_frames_each_camera", 0)
+        expected_frames = total_bags * expected_frames_per_bag
+
         return {
-            "total_bags": total_bags,
+            "expected_bags": total_bags,
             "ok_bags": ok_bags,
-            "total_frames": total_frames,
+            "expected_frames": expected_frames,
             "ok_frames": ok_frames,
+            "total_bags": total_bags,
+            "total_frames": total_frames,
             "bags": bag_summaries,
         }
 

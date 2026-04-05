@@ -428,6 +428,8 @@ class WorkflowAIProcessor:
                         "sample_index": sample_index,
                         "sample_name": sample_name,
                         "status": "ok" if schema_report.get("ok") else "schema_invalid",
+                        "failure_stage": None if schema_report.get("ok") else "inference",
+                        "reason": None if schema_report.get("ok") else "schema_invalid",
                         "collision_pred": collision_pred,
                         "none_retry_count": none_retry_count,
                         "retry_count": retry_count,
@@ -452,7 +454,9 @@ class WorkflowAIProcessor:
                     sample_result = {
                         "sample_index": sample_index,
                         "sample_name": sample_name,
-                        "status": "failed",
+                        "status": "ai_failed",
+                        "failure_stage": "upload" if "upload" in str(e).lower() else "inference",
+                        "reason": "upload_failed" if "upload" in str(e).lower() else "inference_failed",
                         "error": str(e),
                         "collision_pred": None,
                     }
@@ -464,7 +468,7 @@ class WorkflowAIProcessor:
         retained_samples = self._build_retained_samples(sequence_results)
         analysis = self._build_task_analysis(row_meta, task_meta, aggregate, retained_samples)
         result = {
-            "status": "ok" if aggregate["failed_samples"] == 0 else "partial_failed",
+            "status": "ok" if aggregate["failed_samples"] == 0 else ("failed" if aggregate.get("valid_samples", 0) == 0 else "partial_failed"),
             "elapsed_sec": round(time.time() - started, 3),
             "sample_count": len(sample_names),
             "sequence_results": sequence_results,
@@ -787,7 +791,7 @@ class WorkflowAIProcessor:
                 suspected_count += 1
                 valid_samples += 1
             else:
-                if status == "failed":
+                if status in ("failed", "ai_failed", "schema_invalid"):
                     failed_samples += 1
             result_sequence.append(compact_label or pred)
             detailed_sequence.append({

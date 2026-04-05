@@ -11,48 +11,24 @@ import openpyxl
 def determine_row_result(row_summary: dict[str, Any]) -> tuple[str, str]:
     """
     根据 row_summary 判定行级最终结果和失败原因。
+    直接消费 row_summary 中的 primary_failure_reason 和 analysis.counts。
 
     返回 (result, reason):
       result: yes / suspected / no / failed
-      reason: 失败阶段描述，无失败时为空字符串
+      reason: 失败原因，无失败时为空字符串
     """
     status = row_summary.get("status", "")
-    task_summaries = row_summary.get("task_summaries", [])
     analysis = row_summary.get("analysis", {})
+    reason = row_summary.get("primary_failure_reason", "")
 
-    # 优先从 row_summary.analysis.counts 获取聚合结果
     row_counts = analysis.get("counts", {})
     yes_count = int(row_counts.get("yes", 0))
     suspected_count = int(row_counts.get("suspected", 0))
     no_count = int(row_counts.get("no", 0))
-
-    # 从 task_summaries 收集失败阶段信息
-    failed_stages: list[str] = []
-    for task in task_summaries:
-        task_status = task.get("status", "")
-        ai_status = task.get("ai_status")
-        if task_status in ("download_failed",):
-            failed_stages.append("下载失败")
-        elif task_status in ("decode_failed", "worker_failed", "missing_target_ts"):
-            failed_stages.append("解码失败")
-        elif ai_status in ("failed", "partial_failed"):
-            failed_stages.append("AI推理失败")
-        elif task_status == "failed":
-            # 通用 failed：根据是否有 decode 产物推断失败阶段
-            error_msg = str(task.get("error", ""))
-            if any(k in error_msg for k in ("ffmpeg", "rosbag", "decode", "bag")):
-                failed_stages.append("解码失败")
-            elif any(k in error_msg for k in ("ai", "API", "http", "timeout", "SSE")):
-                failed_stages.append("AI推理失败")
-            else:
-                failed_stages.append("运行失败")
-
     has_valid_results = (yes_count + suspected_count + no_count) > 0
 
-    # 判定结果
-    if not has_valid_results:
-        reason = "; ".join(sorted(set(failed_stages))) if failed_stages else "全部任务失败"
-        return "failed", reason
+    if status == "failed" or not has_valid_results:
+        return "failed", reason or "全部任务失败"
 
     if yes_count > 0:
         result = "yes"
@@ -61,7 +37,6 @@ def determine_row_result(row_summary: dict[str, Any]) -> tuple[str, str]:
     else:
         result = "no"
 
-    reason = "; ".join(sorted(set(failed_stages))) if failed_stages else ""
     return result, reason
 
 
@@ -140,7 +115,7 @@ def run_writeback(config_path: str | Path) -> dict[str, Any]:
             if excel_row in processed_excel_rows:
                 continue
             ws.cell(row=excel_row, column=result_col, value="failed")
-            reason = row_entry.get("error") or "下载失败"
+            reason = row_entry.get("primary_failure_reason") or row_entry.get("reason") or row_entry.get("error") or "下载失败"
             ws.cell(row=excel_row, column=reason_col, value=reason)
             processed_excel_rows.add(excel_row)
             entry = {"row_dir": None, "excel_row": excel_row, "result": "failed", "reason": reason}
