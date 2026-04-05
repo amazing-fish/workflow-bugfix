@@ -144,11 +144,16 @@ class DIBagDownloader:
                     "reason": "download_failed",
                     "error": str(e),
                 }
-                if isinstance(e, DownloadError):
-                    result["download_retries"] = max(0, e.attempts - 1)
                 if row_dir.exists():
                     result["row_dir"] = str(row_dir)
                     result["row_meta_path"] = str(row_dir / "row_meta.json")
+                    try:
+                        rm = json.loads((row_dir / "row_meta.json").read_text(encoding="utf-8"))
+                        dl_stats = rm.get("download_stats") or []
+                        result["download_retries"] = sum(max(0, s.get("attempts", 1) - 1) for s in dl_stats)
+                    except Exception:
+                        if isinstance(e, DownloadError):
+                            result["download_retries"] = max(0, e.attempts - 1)
                 yield result
 
     def load_row_meta(self, row_dir: str | Path) -> dict[str, Any]:
@@ -203,6 +208,13 @@ class DIBagDownloader:
         except Exception as e:
             fail_stats = {}
             if isinstance(e, DownloadError):
+                download_stats.append({
+                    "topic": topic,
+                    "status": "failed",
+                    "attempts": e.attempts,
+                    "retry_reasons": e.retry_reasons,
+                    "last_reason": e.last_reason,
+                })
                 fail_stats = {"attempts": e.attempts, "retry_reasons": e.retry_reasons, "last_reason": e.last_reason}
             row_meta = {
                 "excel_row": excel_row,
