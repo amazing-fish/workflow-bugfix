@@ -360,7 +360,7 @@ class WorkflowAIProcessor:
                     save_json(uploaded_files, ai_dir / "uploaded_files.json")
                     save_json(payload, ai_dir / "workflow_payload.json")
 
-                    max_retry = 3
+                    max_retry = int(self.runtime_cfg.get("max_retry", 3))
                     stream_result: dict[str, Any] | None = None
                     schema_report: dict[str, Any] | None = None
                     normalized: dict[str, Any] | None = None
@@ -413,11 +413,12 @@ class WorkflowAIProcessor:
                             if attempt < max_retry and is_retryable_ai_error(e):
                                 retry_count += 1
                                 retry_reasons.append("ai_call_error")
+                                error_delay = float(self.runtime_cfg.get("error_retry_delay_sec", 60))
                                 log_warn(
                                     f"{row_meta.get('row_id')}/{task_meta.get('task_id')}/{sample_name} "
-                                    f"AI 调用失败，60 秒后重试 {retry_count}/{max_retry}: {e}"
+                                    f"AI 调用失败，{error_delay:.0f} 秒后重试 {retry_count}/{max_retry}: {e}"
                                 )
-                                time.sleep(60)
+                                time.sleep(error_delay)
                                 continue
                             raise
 
@@ -776,10 +777,14 @@ class WorkflowAIProcessor:
         suspected_count = 0
         failed_samples = 0
         valid_samples = 0
+        total_retry_count = 0
+        all_retry_reasons: list[str] = []
         result_sequence: list[str | None] = []
         detailed_sequence: list[dict[str, Any]] = []
 
         for item in sequence_results:
+            total_retry_count += int(item.get("retry_count", 0))
+            all_retry_reasons.extend(item.get("retry_reasons") or [])
             pred = item.get("collision_pred")
             status = item.get("status")
             compact_label = to_analysis_label(pred)
@@ -810,6 +815,8 @@ class WorkflowAIProcessor:
             "yes_count": yes_count,
             "no_count": no_count,
             "suspected_count": suspected_count,
+            "total_retry_count": total_retry_count,
+            "retry_reasons": all_retry_reasons,
             "result_sequence": result_sequence,
             "detailed_sequence": detailed_sequence,
         }

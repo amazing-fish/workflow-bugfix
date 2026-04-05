@@ -18,6 +18,15 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+class DownloadError(RuntimeError):
+    """下载失败，携带重试统计。"""
+    def __init__(self, msg: str, attempts: int = 0, retry_reasons: list[str] | None = None, last_reason: str = "unknown"):
+        super().__init__(msg)
+        self.attempts = attempts
+        self.retry_reasons = retry_reasons or []
+        self.last_reason = last_reason
+
+
 class DIBagDownloader:
     """
     行级下载器。
@@ -40,9 +49,16 @@ class DIBagDownloader:
         self.base_url = self.cfg["base_url"].rstrip("/")
         self.verify_ssl = self.cfg.get("verify_ssl", False)
         self.timeout_sec = int(self.cfg.get("timeout_sec", 30))
-        self.download_retry_times = int(self.cfg.get("download_retry_times", 2))
         self.debug = bool(self.cfg.get("debug", False))
         self.topics = list(self.cfg.get("topics", []))
+
+        retry_cfg = self.cfg.get("download", {}).get("retry", {})
+        if "max_attempts" in retry_cfg:
+            self.download_max_attempts = max(1, int(retry_cfg["max_attempts"]))
+        else:
+            self.download_max_attempts = max(1, int(self.cfg.get("download_retry_times", 2)) + 1)
+        self.download_backoff_base = float(retry_cfg.get("backoff_base_sec", 2.0))
+        self.download_backoff_max = float(retry_cfg.get("backoff_max_sec", 30.0))
 
         self.browser_headers = dict(self.cfg.get("browser_headers", {}))
         self.excel_cfg = dict(self.cfg.get("excel", {}))
@@ -131,6 +147,13 @@ class DIBagDownloader:
                 if row_dir.exists():
                     result["row_dir"] = str(row_dir)
                     result["row_meta_path"] = str(row_dir / "row_meta.json")
+                    try:
+                        rm = json.loads((row_dir / "row_meta.json").read_text(encoding="utf-8"))
+                        dl_stats = rm.get("download_stats") or []
+                        result["download_retries"] = sum(max(0, s.get("attempts", 1) - 1) for s in dl_stats)
+                    except Exception:
+                        if isinstance(e, DownloadError):
+                            result["download_retries"] = max(0, e.attempts - 1)
                 yield result
 
     def load_row_meta(self, row_dir: str | Path) -> dict[str, Any]:
@@ -153,6 +176,7 @@ class DIBagDownloader:
         row_dir.mkdir(parents=True, exist_ok=True)
 
         downloaded = {}
+        download_stats: list[dict[str, Any]] = []
         try:
             bucket = self._extract_bucket_from_obs_path(dataset["transfer_path"])
             obs_download_url = self._download_menu(bucket)
@@ -172,15 +196,26 @@ class DIBagDownloader:
                     remote_path=remote_path,
                     dataset_name=dataset.get("dataset_name"),
                 )
-                local_bag_path = self._download_by_obs_id(
+                dl_result = self._download_by_obs_id(
                     obs_download_url=obs_download_url,
                     obs_id=obs_id,
                     save_dir=row_dir,
                     save_name=f"{topic}.bag",
                 )
-                downloaded[topic] = str(local_bag_path)
-                print(f"[OK] {row_id} 下载完成 {topic} -> {local_bag_path}")
+                downloaded[topic] = dl_result["path"]
+                download_stats.append({"topic": topic, **dl_result})
+                print(f"[OK] {row_id} 下载完成 {topic} -> {dl_result['path']}")
         except Exception as e:
+            fail_stats = {}
+            if isinstance(e, DownloadError):
+                download_stats.append({
+                    "topic": topic,
+                    "status": "failed",
+                    "attempts": e.attempts,
+                    "retry_reasons": e.retry_reasons,
+                    "last_reason": e.last_reason,
+                })
+                fail_stats = {"attempts": e.attempts, "retry_reasons": e.retry_reasons, "last_reason": e.last_reason}
             row_meta = {
                 "excel_row": excel_row,
                 "row_id": row_id,
@@ -189,11 +224,13 @@ class DIBagDownloader:
                 "dataset": dataset,
                 "collision": collision_info,
                 "downloaded": downloaded,
+                "download_stats": download_stats,
                 "tasks": [],
                 "status": "download_failed",
                 "failure_stage": "download",
                 "reason": "download_error",
                 "error": str(e),
+                **fail_stats,
             }
             row_meta_path = row_dir / "row_meta.json"
             with open(row_meta_path, "w", encoding="utf-8") as f:
@@ -210,6 +247,7 @@ class DIBagDownloader:
             "dataset": dataset,
             "collision": collision_info,
             "downloaded": downloaded,
+            "download_stats": download_stats,
             "tasks": tasks,
             "status": "downloaded",
         }
@@ -219,6 +257,7 @@ class DIBagDownloader:
             json.dump(row_meta, f, ensure_ascii=False, indent=2)
 
         print(f"[INFO] {row_id} 就绪: timestamps={len(tasks)}, row_meta={row_meta_path}")
+        download_retries = sum(max(0, s.get("attempts", 1) - 1) for s in download_stats)
         return {
             "excel_row": excel_row,
             "row_id": row_id,
@@ -226,6 +265,8 @@ class DIBagDownloader:
             "row_dir": str(row_dir),
             "row_meta_path": str(row_meta_path),
             "timestamp_count": len(tasks),
+            "download_stats": download_stats,
+            "download_retries": download_retries,
         }
 
     def _build_decode_tasks(self, collision_info: dict[str, Any]) -> list[dict[str, Any]]:
@@ -480,13 +521,14 @@ class DIBagDownloader:
             raise RuntimeError(f"getObsId 未返回 result: {data}")
         return str(obs_id)
 
-    def _download_by_obs_id(self, obs_download_url: str, obs_id: str, save_dir: Path, save_name: str) -> Path:
+    def _download_by_obs_id(self, obs_download_url: str, obs_id: str, save_dir: Path, save_name: str) -> dict[str, Any]:
         save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / save_name
         url = obs_download_url + "/obs/v1/files/download?opid=" + obs_id
         headers = self._headers_for("rivulet", json_body=False)
         last_error: Exception | None = None
-        max_attempts = max(1, self.download_retry_times + 1)
+        max_attempts = max(1, self.download_max_attempts)
+        retry_reasons: list[str] = []
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -505,21 +547,51 @@ class DIBagDownloader:
                     self._validate_bag_magic(content, save_name=save_name, source="raw_response")
                     save_path.write_bytes(content)
                 time.sleep(1.0)
-                return save_path
+                return {
+                    "path": str(save_path),
+                    "status": "ok",
+                    "attempts": attempt,
+                    "retry_reasons": retry_reasons,
+                }
             except Exception as e:
                 last_error = e
+                reason = self._classify_download_error(e)
                 can_retry = self._is_retriable_download_error(e)
                 if attempt >= max_attempts or not can_retry:
                     break
-                sleep_sec = float(2 ** attempt)
+                retry_reasons.append(reason)
+                sleep_sec = min(self.download_backoff_base ** attempt, self.download_backoff_max)
                 print(
-                    f"[WARN] {save_name} 下载异常，第 {attempt}/{max_attempts} 次失败，"
+                    f"[WARN] {save_name} 下载异常({reason})，第 {attempt}/{max_attempts} 次失败，"
                     f"{sleep_sec:.1f}s 后重试: {e}"
                 )
                 time.sleep(sleep_sec)
 
         assert last_error is not None
-        raise RuntimeError(f"{save_name} 下载失败（已重试 {max_attempts - 1} 次）: {last_error}") from last_error
+        raise DownloadError(
+            f"{save_name} 下载失败（共尝试 {attempt} 次）: {last_error}",
+            attempts=attempt,
+            retry_reasons=retry_reasons,
+            last_reason=self._classify_download_error(last_error),
+        )
+
+    @staticmethod
+    def _classify_download_error(exc: Exception) -> str:
+        cur: BaseException | None = exc
+        while cur is not None:
+            if isinstance(cur, requests.Timeout):
+                return "timeout"
+            if isinstance(cur, requests.ConnectionError):
+                return "connection_error"
+            if isinstance(cur, zipfile.BadZipFile):
+                return "bad_zip"
+            cur = cur.__cause__ or cur.__context__
+        msg = str(exc)
+        if "File magic is invalid" in msg:
+            return "invalid_bag_magic"
+        if "未找到 .bag" in msg:
+            return "zip_no_bag"
+        return "unknown"
 
     @staticmethod
     def _looks_like_zip(content: bytes) -> bool:

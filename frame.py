@@ -5,6 +5,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,10 @@ class MultiFrameDecoder:
         self.image_ext = decoder_cfg.get("image_ext", "png").lstrip(".").lower()
         self.context_before_packets = int(decoder_cfg.get("context_before_packets", 12))
         self.context_after_packets = int(decoder_cfg.get("context_after_packets", 0))
+
+        retry_cfg = decoder_cfg.get("retry", {})
+        self.decode_max_attempts = max(1, int(retry_cfg.get("max_attempts", 2)))
+        self.decode_retry_delay = float(retry_cfg.get("delay_sec", 0.5))
 
         self.topic_keywords = match_cfg.get(
             "topic_keywords", ["camera", "encoded", "h265", "fisheye"]
@@ -132,7 +137,14 @@ class MultiFrameDecoder:
                 output_name = f"{bag_path.stem}.{self.image_ext}"
                 output_path = sample_frames_dir / output_name
 
-                decode_result = self._decode_one_frame(reader, indexed, frame_idx, output_path)
+                decode_result = None
+                decode_attempts = 0
+                for _attempt in range(1, self.decode_max_attempts + 1):
+                    decode_attempts = _attempt
+                    decode_result = self._decode_one_frame(reader, indexed, frame_idx, output_path)
+                    if decode_result["status"] == "ok" or _attempt >= self.decode_max_attempts:
+                        break
+                    time.sleep(self.decode_retry_delay)
                 frames.append({
                     "sample": sample_name,
                     "sample_dir": str(self.out_dir / sample_name),
@@ -144,6 +156,7 @@ class MultiFrameDecoder:
                     "image_path": str(output_path) if decode_result["status"] == "ok" else None,
                     "decode_method": decode_result.get("decode_method"),
                     "payload_field": decode_result.get("payload_field"),
+                    "decode_attempts": decode_attempts,
                 })
 
             ok_count = sum(1 for x in frames if x["status"] == "ok")
@@ -366,12 +379,15 @@ class MultiFrameDecoder:
         ok_bags = 0
         total_frames = 0
         ok_frames = 0
+        total_decode_retries = 0
 
         bag_summaries = {}
         for camera_name, bag_info in bags.items():
             frames = bag_info.get("frames", [])
             bag_ok_frames = sum(1 for x in frames if x.get("status") == "ok")
             bag_total_frames = len(frames)
+            bag_retries = sum(max(0, x.get("decode_attempts", 1) - 1) for x in frames)
+            total_decode_retries += bag_retries
             if bag_info.get("status") in ("ok", "decode_failed") and bag_ok_frames > 0:
                 ok_bags += 1
             total_frames += bag_total_frames
@@ -380,6 +396,7 @@ class MultiFrameDecoder:
                 "status": bag_info.get("status"),
                 "ok_frames": bag_ok_frames,
                 "total_frames": bag_total_frames,
+                "decode_retries": bag_retries,
             }
 
         expected_frames_per_bag = manifest.get("total_frames_each_camera", 0)
@@ -392,6 +409,7 @@ class MultiFrameDecoder:
             "ok_frames": ok_frames,
             "total_bags": total_bags,
             "total_frames": total_frames,
+            "decode_retries": total_decode_retries,
             "bags": bag_summaries,
         }
 
