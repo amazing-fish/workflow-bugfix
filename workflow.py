@@ -602,7 +602,7 @@ class RowWorkflow:
             "task_summaries": self._build_row_task_summaries(results),
         }
 
-        cleanup_result = self._cleanup_bags_if_needed(row_dir, row_meta, row_summary)
+        cleanup_result = self._cleanup_bags_if_needed(row_dir, row_meta, row_summary, results)
         if cleanup_result is not None:
             row_summary["cleanup"] = cleanup_result
             row_meta["cleanup"] = cleanup_result
@@ -752,13 +752,24 @@ class RowWorkflow:
             "task_count_lines": task_lines,
         }
 
-    def _cleanup_bags_if_needed(self, row_dir: Path, row_meta: dict[str, Any], row_summary: dict[str, Any]) -> dict[str, Any] | None:
+    def _cleanup_bags_if_needed(self, row_dir: Path, row_meta: dict[str, Any], row_summary: dict[str, Any], results: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
         enabled = bool(self.cleanup_cfg.get("delete_bags_after_row", False))
         only_if_all_ok = bool(self.cleanup_cfg.get("delete_only_if_all_tasks_succeeded", True))
         if not enabled:
             return None
         if only_if_all_ok and row_summary.get("failed_tasks", 0) > 0:
             return {"enabled": True, "deleted": False, "reason": "failed_tasks_present"}
+
+        if row_summary.get("total_tasks", 0) == 0:
+            return {"enabled": True, "deleted": False, "reason": "decode_incomplete"}
+
+        if results:
+            for r in results:
+                ds = r.get("decode_summary")
+                if not ds:
+                    continue
+                if ds.get("ok_bags", 0) != ds.get("expected_bags", 0) or ds.get("ok_frames", 0) != ds.get("expected_frames", 0):
+                    return {"enabled": True, "deleted": False, "reason": "decode_incomplete"}
 
         downloaded = row_meta.get("downloaded") or {}
         deleted_files = []
