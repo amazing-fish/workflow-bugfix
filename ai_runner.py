@@ -454,7 +454,7 @@ class WorkflowAIProcessor:
                     sample_result = {
                         "sample_index": sample_index,
                         "sample_name": sample_name,
-                        "status": "failed",
+                        "status": "ai_failed",
                         "failure_stage": "upload" if "upload" in str(e).lower() else "inference",
                         "reason": "upload_failed" if "upload" in str(e).lower() else "inference_failed",
                         "error": str(e),

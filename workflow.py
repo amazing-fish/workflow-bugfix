@@ -645,9 +645,7 @@ class RowWorkflow:
                 stages["runtime"]["fail"] += 1
                 fail_stage_dist.append("runtime")
                 continue
-            if status in ("decoded", "decode_partial"):
-                stages["decode"]["ok"] += 1
-            elif status == "completed":
+            if status in ("decoded", "decode_partial", "completed", "ai_failed", "ai_partial_failed"):
                 stages["decode"]["ok"] += 1
             if status in ("decoded", "decode_partial"):
                 stages["ai"]["skipped"] += 1
@@ -700,10 +698,6 @@ class RowWorkflow:
             "cleanup": row_summary.get("cleanup"),
             "stage_stats": row_summary.get("stage_stats"),
             "timing": row_summary.get("timing"),
-            "primary_failure_stage": row_summary.get("primary_failure_stage"),
-            "primary_failure_reason": row_summary.get("primary_failure_reason"),
-            "primary_failure_stage": row_summary.get("primary_failure_stage"),
-            "primary_failure_reason": row_summary.get("primary_failure_reason"),
             "primary_failure_stage": row_summary.get("primary_failure_stage"),
             "primary_failure_reason": row_summary.get("primary_failure_reason"),
             "failure_reasons": row_summary.get("failure_reasons"),
