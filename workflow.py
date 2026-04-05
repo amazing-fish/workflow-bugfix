@@ -621,6 +621,7 @@ class RowWorkflow:
             "download": {"ok": 0, "fail": 0},
             "decode": {"ok": 0, "fail": 0},
             "ai": {"ok": 0, "fail": 0, "skipped": 0},
+            "runtime": {"ok": 0, "fail": 0},
         }
         fail_stage_dist: list[str] = []
         for r in results:
