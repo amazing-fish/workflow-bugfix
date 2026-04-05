@@ -48,7 +48,7 @@ class MultiFrameDecoder:
         self.context_after_packets = int(decoder_cfg.get("context_after_packets", 0))
 
         retry_cfg = decoder_cfg.get("retry", {})
-        self.decode_max_attempts = int(retry_cfg.get("max_attempts", 2))
+        self.decode_max_attempts = max(1, int(retry_cfg.get("max_attempts", 2)))
         self.decode_retry_delay = float(retry_cfg.get("delay_sec", 0.5))
 
         self.topic_keywords = match_cfg.get(

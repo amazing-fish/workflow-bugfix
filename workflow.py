@@ -136,8 +136,10 @@ class RowWorkflow:
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
         task_results = [r for row_state in row_states.values() for r in row_state["results"]]
-        stage_stats = self._compute_stage_stats(task_results)
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
+        download_failed_rows = [r for r in all_rows_summary if r.get("status") == "download_failed"]
+        all_results_for_stats = task_results + download_failed_rows
+        stage_stats = self._compute_stage_stats(all_results_for_stats)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary + download_failed_rows)
         stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,
@@ -232,8 +234,10 @@ class RowWorkflow:
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
         task_results = [r for row_state in row_states.values() for r in row_state["results"]]
-        stage_stats = self._compute_stage_stats(task_results)
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in row_summaries)
+        download_failed_rows = [r for r in row_summaries if r.get("status") == "download_failed"]
+        all_results_for_stats = task_results + download_failed_rows
+        stage_stats = self._compute_stage_stats(all_results_for_stats)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in row_summaries + download_failed_rows)
         stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,
@@ -322,8 +326,10 @@ class RowWorkflow:
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
         task_results = [r for row_state in row_states.values() for r in row_state["results"]]
-        stage_stats = self._compute_stage_stats(task_results)
-        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
+        download_failed_rows = [r for r in all_rows_summary if r.get("status") == "download_failed"]
+        all_results_for_stats = task_results + download_failed_rows
+        stage_stats = self._compute_stage_stats(all_results_for_stats)
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary + download_failed_rows)
         stage_stats.setdefault("retry_stats", {})["download"] = dl_retries_total
         summary = {
             "started_at": wf_started,

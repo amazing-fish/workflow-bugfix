@@ -144,6 +144,8 @@ class DIBagDownloader:
                     "reason": "download_failed",
                     "error": str(e),
                 }
+                if isinstance(e, DownloadError):
+                    result["download_retries"] = max(0, e.attempts - 1)
                 if row_dir.exists():
                     result["row_dir"] = str(row_dir)
                     result["row_meta_path"] = str(row_dir / "row_meta.json")
