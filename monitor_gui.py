@@ -115,9 +115,11 @@ def collect_realtime_stats(output_root: Path) -> dict:
                 if isinstance(agg, dict):
                     retry_stats["ai"] += int(agg.get("total_retry_count", 0))
 
+    has_failures = failed_tasks > 0 or stages["download"]["fail"] > 0
     return {"stages": stages, "retry_stats": retry_stats,
             "row_count": row_count, "task_count": task_count,
-            "completed": completed_tasks, "failed": failed_tasks, "pending": pending_tasks}
+            "completed": completed_tasks, "failed": failed_tasks, "pending": pending_tasks,
+            "has_failures": has_failures}
 
 def collect_row_task_tree(output_root: Path) -> list[dict]:
     rows: list[dict] = []
@@ -135,8 +137,8 @@ def collect_row_task_tree(output_root: Path) -> list[dict]:
         if row_summary:
             row_entry["status"] = row_summary.get("status", row_entry["status"])
             row_entry["elapsed_sec"] = row_summary.get("elapsed_sec")
-            row_entry["failure_stage"] = row_summary.get("failure_stage") or row_entry["failure_stage"]
-            row_entry["reason"] = row_summary.get("reason") or row_entry["reason"]
+            row_entry["failure_stage"] = row_summary.get("primary_failure_stage") or row_entry["failure_stage"]
+            row_entry["reason"] = row_summary.get("primary_failure_reason") or row_entry["reason"]
         if row_meta.get("status") == "download_failed":
             rows.append(row_entry)
             continue
@@ -428,8 +430,9 @@ class MonitorApp:
 
     def _update_final_status(self) -> None:
         stats = collect_realtime_stats(self.output_root)
-        if stats["failed"] > 0:
-            self.status_text.set(f"● 已完成（有 {stats['failed']} 个失败）")
+        if stats.get("has_failures"):
+            total_fail = stats["failed"] + stats["stages"]["download"]["fail"]
+            self.status_text.set(f"● 已完成（有 {total_fail} 个失败）")
         self.current_phase = ""
 
     def _should_use_workflow_summary(self) -> bool:
@@ -469,7 +472,31 @@ class MonitorApp:
             self.elapsed_text.set(_format_elapsed(time.monotonic() - self.run_start_mono))
 
     def _update_overview(self) -> None:
-        stats = collect_realtime_stats(self.output_root)
+        stats = None
+        if self._should_use_workflow_summary():
+            summary = _read_json(self.output_root / "workflow_summary.json")
+            if summary and "stage_stats" in summary:
+                ss = summary["stage_stats"]
+                stages = ss.get("stages", {})
+                # Ensure all three stages exist with defaults
+                for key in ("download", "decode", "ai"):
+                    stages.setdefault(key, {"ok": 0, "fail": 0, "skipped": 0})
+                retry_stats = ss.get("retry_stats", {"download": 0, "decode": 0, "ai": 0})
+                row_count = summary.get("total_rows", 0)
+                completed = summary.get("completed_rows", 0)
+                failed = summary.get("failed_rows", 0)
+                task_count = completed + failed
+                pending = 0
+                elapsed_sec = summary.get("elapsed_sec")
+                if elapsed_sec is not None:
+                    self.elapsed_text.set(_format_elapsed(elapsed_sec))
+                has_failures = failed > 0 or stages.get("download", {}).get("fail", 0) > 0
+                stats = {"stages": stages, "retry_stats": retry_stats,
+                         "row_count": row_count, "task_count": task_count,
+                         "completed": completed, "failed": failed, "pending": pending,
+                         "has_failures": has_failures}
+        if stats is None:
+            stats = collect_realtime_stats(self.output_root)
         stages = stats["stages"]
         # Refresh stage table
         for item in self.ov_tree.get_children():
