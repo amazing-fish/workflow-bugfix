@@ -140,6 +140,8 @@ class RowWorkflow:
             "total_rows": len(all_rows_summary),
             "completed_rows": sum(1 for row in all_rows_summary if row.get("status") == "completed"),
             "failed_rows": sum(1 for row in all_rows_summary if row.get("status") != "completed"),
+            "schema_version": "2.0",
+            "run_mode": "full",
             "rows": all_rows_summary,
         }
         self._save_json(self.output_root / "workflow_summary.json", summary)
@@ -311,6 +313,8 @@ class RowWorkflow:
             "total_rows": len(all_rows_summary),
             "completed_rows": sum(1 for row in all_rows_summary if row.get("status") == "completed"),
             "failed_rows": sum(1 for row in all_rows_summary if row.get("status") != "completed"),
+            "schema_version": "2.0",
+            "run_mode": "decode-only",
             "rows": all_rows_summary,
         }
         self._save_json(self.output_root / "workflow_summary.json", summary)
@@ -406,8 +410,10 @@ class RowWorkflow:
             return {
                 "task_id": None,
                 "target_ts": task.get("target_ts"),
-                "status": "failed",
+                "status": "ai_failed",
                 "error": "missing task_id",
+                "failure_stage": "ai",
+                "reason": "missing_task_id",
                 "task_dir": str(task_dir),
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -417,8 +423,10 @@ class RowWorkflow:
             return {
                 "task_id": task_id,
                 "target_ts": task.get("target_ts"),
-                "status": "failed",
+                "status": "ai_failed",
                 "error": f"missing task_meta: {task_meta_path}",
+                "failure_stage": "ai",
+                "reason": "missing_task_meta",
                 "task_dir": str(task_dir),
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -685,6 +693,13 @@ class RowWorkflow:
             "cleanup": row_summary.get("cleanup"),
             "stage_stats": row_summary.get("stage_stats"),
             "timing": row_summary.get("timing"),
+            "primary_failure_stage": row_summary.get("primary_failure_stage"),
+            "primary_failure_reason": row_summary.get("primary_failure_reason"),
+            "primary_failure_stage": row_summary.get("primary_failure_stage"),
+            "primary_failure_reason": row_summary.get("primary_failure_reason"),
+            "primary_failure_stage": row_summary.get("primary_failure_stage"),
+            "primary_failure_reason": row_summary.get("primary_failure_reason"),
+            "failure_reasons": row_summary.get("failure_reasons"),
         }
 
     @staticmethod
