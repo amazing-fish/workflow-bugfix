@@ -53,7 +53,10 @@ class DIBagDownloader:
         self.topics = list(self.cfg.get("topics", []))
 
         retry_cfg = self.cfg.get("download", {}).get("retry", {})
-        self.download_max_attempts = int(retry_cfg.get("max_attempts", self.cfg.get("download_retry_times", 2))) + 1
+        if "max_attempts" in retry_cfg:
+            self.download_max_attempts = max(1, int(retry_cfg["max_attempts"]))
+        else:
+            self.download_max_attempts = max(1, int(self.cfg.get("download_retry_times", 2)) + 1)
         self.download_backoff_base = float(retry_cfg.get("backoff_base_sec", 2.0))
         self.download_backoff_max = float(retry_cfg.get("backoff_max_sec", 30.0))
 
@@ -549,8 +552,8 @@ class DIBagDownloader:
 
         assert last_error is not None
         raise DownloadError(
-            f"{save_name} 下载失败（已重试 {max_attempts - 1} 次）: {last_error}",
-            attempts=max_attempts,
+            f"{save_name} 下载失败（共尝试 {attempt} 次）: {last_error}",
+            attempts=attempt,
             retry_reasons=retry_reasons,
             last_reason=self._classify_download_error(last_error),
         )

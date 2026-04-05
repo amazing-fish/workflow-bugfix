@@ -147,6 +147,8 @@ class RowWorkflow:
             "run_mode": "full",
             "rows": all_rows_summary,
         }
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
+        summary.get("stage_stats", {}).get("retry_stats", {})["download"] = dl_retries_total
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
 
@@ -238,6 +240,8 @@ class RowWorkflow:
             "run_mode": "ai-only",
             "rows": row_summaries,
         }
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in row_summaries)
+        summary.get("stage_stats", {}).get("retry_stats", {})["download"] = dl_retries_total
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
 
@@ -323,6 +327,8 @@ class RowWorkflow:
             "run_mode": "decode-only",
             "rows": all_rows_summary,
         }
+        dl_retries_total = sum(int(r.get("download_retries", 0)) for r in all_rows_summary)
+        summary.get("stage_stats", {}).get("retry_stats", {})["download"] = dl_retries_total
         self._save_json(self.output_root / "workflow_summary.json", summary)
         return summary
 
@@ -588,10 +594,14 @@ class RowWorkflow:
         stage_stats = self._compute_stage_stats(results)
         elapsed_list = [r.get("elapsed_sec") for r in results if r.get("elapsed_sec") is not None]
 
+        dl_stats = row_meta.get("download_stats") or []
+        download_retries = sum(max(0, s.get("attempts", 1) - 1) for s in dl_stats)
+
         row_summary = {
             "row_id": row_meta.get("row_id"),
             "excel_row": row_meta.get("excel_row"),
             "status": status,
+            "download_retries": download_retries,
             "primary_failure_stage": primary_failure_stage,
             "primary_failure_reason": primary_failure_reason,
             "failure_reasons": failure_reasons,
@@ -673,7 +683,7 @@ class RowWorkflow:
             stages[key]["total"] = total
             stages[key]["success_rate"] = round(stages[key]["ok"] / total, 2) if total > 0 else None
 
-        retry_stats = {"download": 0, "decode": 0, "ai": 0}
+        retry_stats = {"decode": 0, "ai": 0}
         for r in results:
             ds = r.get("decode_summary")
             if isinstance(ds, dict):
@@ -714,6 +724,7 @@ class RowWorkflow:
             "row_id": row_summary.get("row_id") or row_dir.name,
             "row_dir": str(row_dir),
             "status": row_summary.get("status"),
+            "download_retries": row_summary.get("download_retries", 0),
             "total_tasks": row_summary.get("total_tasks"),
             "ok_tasks": row_summary.get("ok_tasks"),
             "failed_tasks": row_summary.get("failed_tasks"),
