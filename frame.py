@@ -113,19 +113,19 @@ class MultiFrameDecoder:
 
             ts_list = [x["ts_sec"] for x in indexed]
             center_idx = self._find_nearest_index(ts_list, self.target_ts)
-            selected = self._select_fixed_window_indices(
+            selected, center_slot = self._select_fixed_window_indices(
                 total=len(indexed),
                 center_idx=center_idx,
                 before_frames=self.before_frames,
                 after_frames=self.after_frames,
             )
 
-            center_actual_ts = indexed[center_idx]["ts_sec"]
+            center_actual_ts = indexed[selected[center_slot][1]]["ts_sec"]
             frames = []
-            for rel_idx, frame_idx in selected:
+            for slot, frame_idx in selected:
                 item = indexed[frame_idx]
                 actual_ts = item["ts_sec"]
-                sample_no = rel_idx + self.before_frames + 1
+                sample_no = slot + 1
                 sample_name = f"sample{sample_no:02d}"
                 sample_frames_dir = self.out_dir / sample_name / "frames"
                 sample_frames_dir.mkdir(parents=True, exist_ok=True)
@@ -155,11 +155,13 @@ class MultiFrameDecoder:
                 f"decoded={ok_count}/{len(frames)}"
             )
 
+            center_sample_name = f"sample{center_slot + 1:02d}"
             return {
                 "status": "ok" if ok_count > 0 else "decode_failed",
                 "bag_path": str(bag_path),
                 "center_actual_ts": round(center_actual_ts, 9),
                 "center_delta_sec": round(center_actual_ts - self.target_ts, 9),
+                "center_sample": center_sample_name,
                 "relative_offsets_sec": [x["delta_to_center_sec"] for x in frames],
                 "target_deltas_sec": [x["delta_to_target_sec"] for x in frames],
                 "frames": frames,
@@ -211,7 +213,11 @@ class MultiFrameDecoder:
         center_idx: int,
         before_frames: int,
         after_frames: int,
-    ) -> list[tuple[int, int]]:
+    ) -> tuple[list[tuple[int, int]], int]:
+        """
+        Returns ([(slot, frame_idx), ...], center_slot).
+        slot is 0-based sequential; center_slot marks which slot holds center_idx.
+        """
         window_size = before_frames + 1 + after_frames
         start = center_idx - before_frames
         end = center_idx + after_frames
@@ -239,14 +245,20 @@ class MultiFrameDecoder:
                 break
 
         indices = indices[:window_size]
-        rels = list(range(-before_frames, after_frames + 1))[:len(indices)]
+
+        if center_idx in indices:
+            center_slot = indices.index(center_idx)
+        else:
+            center_slot = min(range(len(indices)), key=lambda i: abs(indices[i] - center_idx))
+
         if len(indices) < window_size:
             print(
                 f"[WARN] 帧数不足: 需要 {window_size} 帧，实际仅 {len(indices)} 帧 "
                 f"(total={total}, center_idx={center_idx})，"
                 f"sample 编号保持连续槽位，真实偏移见 delta_to_center_sec"
             )
-        return list(zip(rels, indices))
+        pairs = [(slot, indices[slot]) for slot in range(len(indices))]
+        return pairs, center_slot
 
     def _find_payload(self, msg) -> tuple[bytes | None, str | None]:
         for field in self.payload_fields:

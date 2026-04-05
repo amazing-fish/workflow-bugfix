@@ -534,10 +534,13 @@ class WorkflowAIProcessor:
         if mode == "sample_sequence_per_camera":
             return samples
         if mode == "center_frame_per_camera":
+            for _, bag_info in bags.items():
+                cs = bag_info.get("center_sample")
+                if cs:
+                    return [cs]
             before_frames = int(manifest.get("before_frames", 4))
             center_no = before_frames + 1
-            ext = Path(samples[0]).suffix if samples else ".png"
-            return [f"sample{center_no:02d}{ext}"]
+            return [f"sample{center_no:02d}"]
         if mode == "sample_name_per_camera":
             sample_names = list(self.selection_cfg.get("sample_names", []))
             return sample_names
