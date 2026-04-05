@@ -438,8 +438,10 @@ class RowWorkflow:
         manifest_path = task_dir / "manifest.json"
         if not manifest_path.exists():
             task_meta.update({
-                "status": "failed",
+                "status": "ai_failed",
                 "error": f"missing manifest: {manifest_path}",
+                "failure_stage": "ai",
+                "reason": "missing_manifest",
             })
             task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
             task_meta["elapsed_sec"] = round(time.monotonic() - _t_start, 2)
@@ -634,9 +636,13 @@ class RowWorkflow:
                 fail_stage_dist.append("timestamp")
                 continue
             stages["timestamp"]["ok"] += 1
-            if status in ("decode_failed", "worker_failed"):
+            if status == "decode_failed":
                 stages["decode"]["fail"] += 1
                 fail_stage_dist.append("decode")
+                continue
+            if status == "worker_failed":
+                stages["runtime"]["fail"] += 1
+                fail_stage_dist.append("runtime")
                 continue
             if status in ("decoded", "decode_partial"):
                 stages["decode"]["ok"] += 1
