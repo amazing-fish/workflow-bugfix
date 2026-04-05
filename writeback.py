@@ -115,7 +115,7 @@ def run_writeback(config_path: str | Path) -> dict[str, Any]:
             if excel_row in processed_excel_rows:
                 continue
             ws.cell(row=excel_row, column=result_col, value="failed")
-            reason = row_entry.get("error") or "下载失败"
+            reason = row_entry.get("reason") or row_entry.get("error") or "下载失败"
             ws.cell(row=excel_row, column=reason_col, value=reason)
             processed_excel_rows.add(excel_row)
             entry = {"row_dir": None, "excel_row": excel_row, "result": "failed", "reason": reason}

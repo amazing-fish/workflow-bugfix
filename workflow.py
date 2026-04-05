@@ -198,6 +198,8 @@ class RowWorkflow:
                         "target_ts": task.get("target_ts"),
                         "status": "worker_failed",
                         "error": str(e),
+                        "failure_stage": "runtime",
+                        "reason": "worker_exception",
                         "task_dir": str(row_dir / str(task.get("task_id"))),
                         "started_at": datetime.now(timezone.utc).isoformat(),
                         "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -380,13 +382,13 @@ class RowWorkflow:
                 else:
                     task_meta["status"] = "ai_partial_failed"
                     task_meta["failure_stage"] = "ai"
-                    task_meta["reason"] = "partial_failed"
+                    task_meta["reason"] = "ai_partial_failed"
 
         except Exception as e:
-            task_meta["status"] = "failed"
+            task_meta["status"] = "ai_failed" if "manifest_path" in task_meta else "decode_failed"
             task_meta["error"] = str(e)
-            task_meta["failure_stage"] = "decode" if "decode" not in task_meta else "ai"
-            task_meta["reason"] = str(e)
+            task_meta["failure_stage"] = "ai" if "manifest_path" in task_meta else "decode"
+            task_meta["reason"] = "inference_failed" if "manifest_path" in task_meta else "decode_error"
             print(f"[ERROR] {row_meta['row_id']}/{task_id} 失败: {e}")
 
         task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
@@ -553,7 +555,16 @@ class RowWorkflow:
                 if reason and reason not in failure_reasons:
                     failure_reasons.append(reason)
         primary_failure_stage = min(stage_counts, key=lambda s: STAGE_PRIORITY.get(s, 99)) if stage_counts else None
-        primary_failure_reason = failure_reasons[0] if failure_reasons else None
+        # 从最高优先级 stage 中选出现次数最多的 reason
+        primary_failure_reason = None
+        if primary_failure_stage:
+            stage_reasons: dict[str, int] = {}
+            for r in results:
+                if r.get("failure_stage") == primary_failure_stage and r.get("reason"):
+                    rn = r["reason"]
+                    stage_reasons[rn] = stage_reasons.get(rn, 0) + 1
+            if stage_reasons:
+                primary_failure_reason = max(stage_reasons, key=stage_reasons.get)
         row_analysis = self._build_row_analysis(row_meta, results)
 
         stage_stats = self._compute_stage_stats(results)
