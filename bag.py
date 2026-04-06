@@ -442,34 +442,119 @@ class DIBagDownloader:
 
     def _resolve_by_seqno(self, locator: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}/{locator['platform']}/v1/carjam/querySubTaskByType"
-        payload = {
-            "orderByTideName": True,
-            "pageNum": 1,
-            "pageSize": 100,
-            "seqno": [locator["seqno"]],
-        }
         headers = self._headers_for(locator["platform"])
+        target_sub_seqno = self._normalize_seqno(locator["sub_seqno"])
+        max_pages = 20
+        page_size = 100
+        found_subtask = None
+        matched_item: dict[str, Any] | None = None
+        found_subtask_without_path = False
 
-        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("list") or []
-        if not items:
-            raise RuntimeError(f"querySubTaskByType 返回空: seqno={locator['seqno']}")
+        for page_num in range(1, max_pages + 1):
+            payload = {
+                "orderByTideName": True,
+                "pageNum": page_num,
+                "pageSize": page_size,
+                "seqno": [locator["seqno"]],
+            }
+            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("list") or []
+            if page_num == 1 and not items:
+                raise RuntimeError(f"querySubTaskByType 返回空: seqno={locator['seqno']}")
+            if not items:
+                break
 
-        for item in items:
-            if str(item.get("subSeqNo")) == str(locator["sub_seqno"]):
-                transfer_path = item.get("carjamFilePath") or item.get("replayFilePath")
-                if not transfer_path:
-                    raise RuntimeError("命中 subtask，但缺少 carjamFilePath/replayFilePath")
-                return {
-                    "transfer_path": str(transfer_path),
-                    "data_segment": str(item.get("tideName") or locator["sub_seqno"]),
-                    "dataset_name": str(item.get("tideName") or locator["sub_seqno"]),
-                    "add_slash_before_archive": False,
-                }
+            for item in items:
+                item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
+                if item_sub_seqno != target_sub_seqno:
+                    continue
+                matched_item = item
+                transfer_path = self._pick_transfer_path(item)
+                if transfer_path:
+                    found_subtask = {
+                        "transfer_path": str(transfer_path),
+                        "data_segment": str(item.get("tideName") or locator["sub_seqno"]),
+                        "dataset_name": str(item.get("tideName") or locator["sub_seqno"]),
+                        "add_slash_before_archive": False,
+                    }
+                    break
+                found_subtask_without_path = True
 
-        raise RuntimeError(f"在 seqno={locator['seqno']} 下未找到 subSeqNo={locator['sub_seqno']}")
+            if found_subtask:
+                return found_subtask
+            if len(items) < page_size:
+                break
+
+        if found_subtask_without_path:
+            fallback_queries = self._build_event_fallback_queries(locator, matched_item)
+            for key, value in fallback_queries:
+                try:
+                    return self._resolve_by_event_list(value=value, key=key)
+                except Exception:
+                    continue
+            raise RuntimeError("命中 subtask，但缺少可用文件路径，且 event/list 多策略回退失败")
+
+        raise RuntimeError(f"在 seqno={locator['seqno']} 下未找到 subSeqNo={locator['sub_seqno']}（已翻页检索）")
+
+    @staticmethod
+    def _normalize_seqno(value: Any) -> str:
+        return str(value or "").strip().lower()
+
+    @staticmethod
+    def _pick_transfer_path(item: dict[str, Any]) -> Any:
+        for key in ("carjamFilePath", "replayFilePath", "transferFilePath", "filePath"):
+            val = item.get(key)
+            if val:
+                return val
+        nested_path = DIBagDownloader._find_first_path_like_value(item)
+        if nested_path:
+            return nested_path
+        return None
+
+    @staticmethod
+    def _find_first_path_like_value(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                k = str(key).lower()
+                if "path" in k and "file" in k and value:
+                    return value
+                found = DIBagDownloader._find_first_path_like_value(value)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for x in obj:
+                found = DIBagDownloader._find_first_path_like_value(x)
+                if found:
+                    return found
+        return None
+
+    def _build_event_fallback_queries(self, locator: dict[str, Any], matched_item: dict[str, Any] | None) -> list[tuple[str, str]]:
+        candidates: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(key: str, value: Any):
+            text = str(value or "").strip()
+            if not text:
+                return
+            pair = (key, text)
+            if pair in seen:
+                return
+            seen.add(pair)
+            candidates.append(pair)
+
+        add("defectId", locator.get("defect_id"))
+        add("id", locator.get("data_name"))
+        add("id", locator.get("sub_seqno"))
+        add("id", locator.get("seqno"))
+
+        if isinstance(matched_item, dict):
+            add("id", matched_item.get("tideName"))
+            add("id", matched_item.get("dataName"))
+            add("defectId", matched_item.get("defectId"))
+
+        return candidates
 
     def _resolve_by_event_list(self, value: str, key: str) -> dict[str, Any]:
         url = f"{self.base_url}/siphon/v1/file/event/list"
@@ -510,16 +595,58 @@ class DIBagDownloader:
     def _get_obs_id(self, bucket: str, remote_path: str, dataset_name: str | None = None) -> str:
         url = f"{self.base_url}/rivulet/v1/dataDownload/getObsId"
         headers = self._headers_for("rivulet")
-        payload = {"files": [{"path": remote_path}], "bucket": bucket}
-        if dataset_name:
-            payload["datasetName"] = dataset_name
-        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        data = resp.json()
-        obs_id = data.get("result")
-        if not obs_id:
-            raise RuntimeError(f"getObsId 未返回 result: {data}")
-        return str(obs_id)
+        errors: list[str] = []
+
+        for candidate_path in self._candidate_obs_paths(bucket=bucket, remote_path=remote_path):
+            payload = {
+                "files": [{
+                    "name": Path(remote_path).name,
+                    "type": "file",
+                    "path": candidate_path,
+                    "size": 0,
+                }],
+                "dataType": [],
+                "bucket": bucket,
+            }
+            if dataset_name:
+                payload["datasetName"] = dataset_name
+            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+            resp.raise_for_status()
+            data = resp.json()
+            obs_id = data.get("result")
+            if obs_id:
+                return str(obs_id)
+            errors.append(f"path={candidate_path}, resp={data}")
+
+        raise RuntimeError(f"getObsId 未返回 result，已尝试多种 path: {' | '.join(errors)}")
+
+    @staticmethod
+    def _candidate_obs_paths(bucket: str, remote_path: str) -> list[str]:
+        raw = str(remote_path or "").strip()
+        if not raw:
+            return [raw]
+
+        variants: list[str] = []
+        seen: set[str] = set()
+
+        def add(path_val: str):
+            p = str(path_val or "").strip()
+            if not p or p in seen:
+                return
+            seen.add(p)
+            variants.append(p)
+
+        stripped = raw.lstrip("/")
+        add(stripped)
+        add("/" + stripped)
+
+        bucket_prefix = bucket.strip("/") + "/"
+        if stripped.startswith(bucket_prefix):
+            tail = stripped[len(bucket_prefix):]
+            add(tail)
+            add("/" + tail)
+
+        return variants
 
     def _download_by_obs_id(self, obs_download_url: str, obs_id: str, save_dir: Path, save_name: str) -> dict[str, Any]:
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -527,7 +654,7 @@ class DIBagDownloader:
         url = obs_download_url + "/obs/v1/files/download?opid=" + obs_id
         headers = self._headers_for("rivulet", json_body=False)
         last_error: Exception | None = None
-        max_attempts = max(1, self.download_max_attempts)
+        max_attempts = max(2, self.download_max_attempts)
         retry_reasons: list[str] = []
 
         for attempt in range(1, max_attempts + 1):
@@ -539,7 +666,10 @@ class DIBagDownloader:
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         bag_members = [n for n in zf.namelist() if n.endswith(".bag")]
                         if not bag_members:
-                            raise RuntimeError(f"download 返回 zip，但未找到 .bag: {save_name}")
+                            raise RuntimeError(
+                                f"download 返回 zip，但未找到 .bag: {save_name}, "
+                                f"zip_entries={len(zf.namelist())}, size={len(content)}"
+                            )
                         extracted = zf.read(bag_members[0])
                         self._validate_bag_magic(extracted, save_name=save_name, source=f"zip_member:{bag_members[0]}")
                         save_path.write_bytes(extracted)
@@ -595,7 +725,9 @@ class DIBagDownloader:
 
     @staticmethod
     def _looks_like_zip(content: bytes) -> bool:
-        return len(content) >= 4 and content[:4] == b"PK\x03\x04"
+        if len(content) < 4:
+            return False
+        return content[:4] in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 
     @staticmethod
     def _validate_bag_magic(content: bytes, save_name: str, source: str) -> None:
@@ -622,6 +754,7 @@ class DIBagDownloader:
             "Read timed out",
             "Connection aborted",
             "Remote end closed connection",
+            "File magic is invalid. source=raw_response, size=22, prefix_hex=504b0506",
         ]
         return any(hint in msg for hint in retriable_hints)
 

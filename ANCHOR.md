@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.3`
+- 当前版本：`v0.3.7`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,31 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.7` `bugfix`（2026-04-06）
+  - 基于 F12 负载修复 `getObsId` 兼容性问题：
+    - `files[]` 由仅传 `path` 升级为携带 `name/type/path/size` 的结构，兼容线上接口习惯。
+    - `getObsId` 增加多 path 变体尝试（带/不带前导 `/`、带/不带 bucket 前缀），降低路径格式差异导致的空结果。
+    - 下载最小尝试次数提升到 2 次，提升短暂空包/网关抖动场景恢复率。
+
+- `v0.3.6` `bugfix`（2026-04-06）
+  - 修复下载返回空 zip（`PK\x05\x06`）被误判为 raw bag 的问题：
+    - zip 识别扩展为 `PK\x03\x04` / `PK\x05\x06` / `PK\x07\x08` 三类签名。
+    - 空 zip 场景统一走 zip 分支并输出 `zip_entries/size`，避免落到 `File magic is invalid` 的误导报错。
+    - 将典型空 zip 特征错误纳入可重试提示，提高短暂后端异常下的恢复概率。
+
+- `v0.3.5` `bugfix`（2026-04-06）
+  - 继续修复 `seqno/subSeqNo` 路径解析失败：
+    - 命中 subtask 后若标准路径字段缺失，支持递归提取嵌套 `*file*path*` 字段值。
+    - `event/list` 回退从单策略升级为多策略（`defectId`、`id=data_name/sub_seqno/seqno`、命中项的 `tideName/dataName`）。
+    - 降低“命中 subtask 但路径缺失且回退失败”的出现概率。
+
+- `v0.3.4` `bugfix`（2026-04-06）
+  - 修复部分 bag 下载前置定位失败：
+    - `querySubTaskByType` 增加分页检索（最多 20 页），避免仅查首页导致 `subSeqNo` 命中失败。
+    - `subSeqNo` 匹配增强：兼容 `subSeqNo/subSeqno` 字段并做大小写/空白归一。
+    - transfer path 提取增强：除 `carjamFilePath/replayFilePath` 外，兼容 `transferFilePath/filePath`。
+    - 命中 subtask 但路径缺失时，增加 `event/list` 回退解析，降低因接口字段不齐导致的失败率。
+
 - `v0.3.3` `bugfix`（2026-04-03）
   - AI 重试策略增强：
     - 除 `None` 外，若结构化输出出现 enum 非法值，也会触发重试。
