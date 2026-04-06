@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import copy
 import sys
 import time
 import zipfile
@@ -40,6 +41,7 @@ class DIBagDownloader:
     """
 
     COLLISION_TS_PATTERN = re.compile(r"【碰撞时间】\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)")
+    UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
     def __init__(self, config_path: str | Path):
         self.config_path = Path(config_path)
@@ -61,6 +63,7 @@ class DIBagDownloader:
         self.download_backoff_max = float(retry_cfg.get("backoff_max_sec", 30.0))
 
         self.browser_headers = dict(self.cfg.get("browser_headers", {}))
+        self.obs_probe_cfg = dict(self.cfg.get("obs_download_probe", {}))
         self.excel_cfg = dict(self.cfg.get("excel", {}))
         self.output_cfg = dict(self.cfg.get("output", {}))
 
@@ -179,7 +182,7 @@ class DIBagDownloader:
         download_stats: list[dict[str, Any]] = []
         try:
             bucket = self._extract_bucket_from_obs_path(dataset["transfer_path"])
-            obs_download_url = self._download_menu(bucket)
+            obs_download_url = self._resolve_obs_download_url(bucket)
 
             self._debug_print(f"[DEBUG] row={row_id} transfer_path={dataset['transfer_path']}")
             self._debug_print(f"[DEBUG] row={row_id} bucket={bucket}")
@@ -542,25 +545,115 @@ class DIBagDownloader:
             raise RuntimeError(f"downloadMenu 未返回 data.obs_download_url: {data}")
         return obs_download_url.rstrip("/")
 
+    def _resolve_obs_download_url(self, bucket_name: str) -> str:
+        probe_base_url = str(self.obs_probe_cfg.get("download_base_url") or "").strip().rstrip("/")
+        if probe_base_url:
+            return probe_base_url
+        return self._download_menu(bucket_name)
+
+    @staticmethod
+    def _build_obs_file_item(remote_path: str, default_size: int = 0) -> dict[str, Any]:
+        path_with_slash = remote_path if remote_path.startswith("/") else f"/{remote_path}"
+        file_name = Path(path_with_slash).name or "unknown.bag"
+        return {
+            "name": file_name,
+            "type": "file",
+            "path": path_with_slash,
+            "size": default_size,
+        }
+
+    def _build_get_obs_id_payload(self, bucket: str, remote_path: str, dataset_name: str | None = None) -> dict[str, Any]:
+        request_body_template = self.obs_probe_cfg.get("request_body")
+        if isinstance(request_body_template, dict):
+            payload = copy.deepcopy(request_body_template)
+            payload["bucket"] = bucket
+            files = payload.get("files") or []
+            template_file = files[0] if isinstance(files, list) and files else {}
+            size = int(template_file.get("size", 0) or 0)
+            payload["files"] = [self._build_obs_file_item(remote_path=remote_path, default_size=size)]
+            payload.setdefault("dataType", [])
+            if dataset_name:
+                payload.setdefault("datasetName", dataset_name)
+            return payload
+
+        payload = {
+            "files": [self._build_obs_file_item(remote_path=remote_path, default_size=0)],
+            "dataType": [],
+            "bucket": bucket,
+        }
+        if self.browser_headers.get("userName"):
+            payload["userName"] = str(self.browser_headers["userName"])
+        if dataset_name:
+            payload["datasetName"] = dataset_name
+        return payload
+
     def _get_obs_id(self, bucket: str, remote_path: str, dataset_name: str | None = None) -> str:
         url = f"{self.base_url}/rivulet/v1/dataDownload/getObsId"
         headers = self._headers_for("rivulet")
-        payload = {"files": [{"path": remote_path}], "bucket": bucket}
-        if dataset_name:
-            payload["datasetName"] = dataset_name
-        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        data = resp.json()
-        obs_id = data.get("result")
-        if not obs_id:
-            raise RuntimeError(f"getObsId 未返回 result: {data}")
-        return str(obs_id)
+        probe_headers = self.obs_probe_cfg.get("get_obs_id_headers") or {}
+        if isinstance(probe_headers, dict):
+            headers.update(probe_headers)
+        payload_primary = self._build_get_obs_id_payload(bucket=bucket, remote_path=remote_path, dataset_name=dataset_name)
+        payload_fallback_min = {"files": [{"path": remote_path}], "bucket": bucket}
+        payload_fallback_slash = {"files": [{"path": remote_path if remote_path.startswith('/') else '/' + remote_path}], "bucket": bucket}
+        payloads = [payload_primary, payload_fallback_min, payload_fallback_slash]
+
+        errors: list[str] = []
+        for idx, payload in enumerate(payloads, start=1):
+            try:
+                resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+                resp.raise_for_status()
+                data = resp.json()
+                obs_id = self._extract_obs_id_from_get_obs_id_response(data)
+                if obs_id:
+                    self._debug_print(f"[DEBUG] getObsId 命中，payload_variant={idx}, obs_id={obs_id}")
+                    return obs_id
+                errors.append(f"variant{idx}: no_obs_id, resp={json.dumps(data, ensure_ascii=False)[:500]}")
+            except Exception as e:
+                errors.append(f"variant{idx}: {e}")
+                continue
+
+        raise RuntimeError(f"getObsId 未取到 obs_id: remote_path={remote_path}, errors={errors}")
+
+    def _extract_obs_id_from_get_obs_id_response(self, data: Any) -> str | None:
+        def pick_uuid_from_scalar(v: Any) -> str | None:
+            if v is None:
+                return None
+            text = str(v).strip()
+            if self.UUID_PATTERN.match(text):
+                return text
+            return None
+
+        def walk(node: Any) -> str | None:
+            if isinstance(node, dict):
+                for key in ("result", "opid", "obsId", "obs_id", "operationId"):
+                    maybe = pick_uuid_from_scalar(node.get(key))
+                    if maybe:
+                        return maybe
+                for v in node.values():
+                    maybe = walk(v)
+                    if maybe:
+                        return maybe
+                return None
+            if isinstance(node, list):
+                for item in node:
+                    maybe = walk(item)
+                    if maybe:
+                        return maybe
+                return None
+            return pick_uuid_from_scalar(node)
+
+        return walk(data)
 
     def _download_by_obs_id(self, obs_download_url: str, obs_id: str, save_dir: Path, save_name: str) -> dict[str, Any]:
         save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / save_name
         url = obs_download_url + "/obs/v1/files/download?opid=" + obs_id
         headers = self._headers_for("rivulet", json_body=False)
+        probe_download_headers = self.obs_probe_cfg.get("download_headers") or {}
+        if isinstance(probe_download_headers, dict):
+            headers.update(probe_download_headers)
+        headers.pop("Content-Type", None)
         last_error: Exception | None = None
         max_attempts = max(1, self.download_max_attempts)
         retry_reasons: list[str] = []

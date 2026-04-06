@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.4`
+- 当前版本：`v0.3.7`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,26 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.7` `bugfix`（2026-04-06）
+  - 修复 `bag.py` 在部分返回体下无法提取 `obs_id` 的问题：
+    - `getObsId` 响应解析增强：兼容 `result/opid/obsId/obs_id/operationId` 及嵌套结构提取。
+    - 增加多 payload 兜底（probe 模板、最简 path、补 `/` path），提升 `obs_id` 获取成功率。
+    - 失败时输出分支级错误信息，便于直接定位是“无 obs_id”还是“接口异常”。
+
+- `v0.3.6` `bugfix`（2026-04-06）
+  - 修复 `bag.py` 下载链路与浏览器请求不一致问题：
+    - `getObsId` 请求体改为兼容浏览器结构（`files.name/type/path/size`、`dataType`、`bucket`、`userName`）。
+    - 新增 `obs_download_probe.download_base_url` 直连能力，优先使用已验证通过的 `/obs-download` 路径。
+    - `getObsId`/`download` 请求头支持透传 `obs_download_probe` 中的专用头字段。
+    - 下载接口请求显式移除 `Content-Type`，与浏览器导航请求保持一致。
+
+- `v0.3.5` `bugfix`（2026-04-06）
+  - 新增本地抓包链路验证脚本 `obs_download_probe.py`：
+    - 严格按 F12 两段请求链路执行 `getObsId` 与 `download?opid=...`。
+    - 支持从 `config.json.obs_download_probe` 读取请求头、请求体、超时和输出目录。
+    - 自动兼容返回 `zip` 与 `raw bag` 两种下载响应，并做 `#ROSBAG` 文件头校验。
+    - 输出 `outputs/obs_probe/probe_result.json`，用于定位请求参数与下载链路是否一致。
+
 - `v0.3.4` `bugfix`（2026-04-06）
   - 修复部分 bag 下载前置定位失败：
     - `querySubTaskByType` 增加分页检索（最多 20 页），避免仅查首页导致 `subSeqNo` 命中失败。
