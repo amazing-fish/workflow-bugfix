@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.7`
+- 当前版本：`v0.3.8`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,14 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.8` `bugfix`（2026-04-06）
+  - 修复 `obs_id` 识别过严导致的下载失败：
+    - `bag.py` 取消仅 UUID 形态识别，改为按关键字段与嵌套结构提取 `obs_id`。
+    - 兼容从 `url/downloadUrl` 查询串中提取 `opid`。
+  - 调整 `obs_download_probe.py`：
+    - 强制从 `getObsId` 响应动态提取 `obs_id`（`obs_id_source=getObsId_response`），避免手工拷贝。
+    - `obs_id` 提取逻辑与主下载链路保持一致。
+
 - `v0.3.7` `bugfix`（2026-04-06）
   - 修复 `bag.py` 在部分返回体下无法提取 `obs_id` 的问题：
     - `getObsId` 响应解析增强：兼容 `result/opid/obsId/obs_id/operationId` 及嵌套结构提取。

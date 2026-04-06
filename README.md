@@ -159,6 +159,7 @@ python obs_download_probe.py config.json
 该脚本会严格按 `config.json.obs_download_probe` 中配置的请求头和请求体调用：
 - `getObsId`
 - `download?opid=...`
+- `opid`（obsid）始终从 `getObsId` 响应动态提取，不依赖手工粘贴。
 
 并将结果输出到：
 - `outputs/obs_probe/<bag_name>.bag`

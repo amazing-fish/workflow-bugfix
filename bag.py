@@ -41,7 +41,6 @@ class DIBagDownloader:
     """
 
     COLLISION_TS_PATTERN = re.compile(r"【碰撞时间】\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)")
-    UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
     def __init__(self, config_path: str | Path):
         self.config_path = Path(config_path)
@@ -616,20 +615,40 @@ class DIBagDownloader:
         raise RuntimeError(f"getObsId 未取到 obs_id: remote_path={remote_path}, errors={errors}")
 
     def _extract_obs_id_from_get_obs_id_response(self, data: Any) -> str | None:
-        def pick_uuid_from_scalar(v: Any) -> str | None:
+        def pick_text(v: Any) -> str | None:
             if v is None:
                 return None
+            if isinstance(v, (dict, list)):
+                return None
             text = str(v).strip()
-            if self.UUID_PATTERN.match(text):
-                return text
-            return None
+            if not text:
+                return None
+            return text
 
         def walk(node: Any) -> str | None:
             if isinstance(node, dict):
                 for key in ("result", "opid", "obsId", "obs_id", "operationId"):
-                    maybe = pick_uuid_from_scalar(node.get(key))
-                    if maybe:
-                        return maybe
+                    if key not in node:
+                        continue
+                    value = node.get(key)
+                    if isinstance(value, (dict, list)):
+                        nested = walk(value)
+                        if nested:
+                            return nested
+                    else:
+                        maybe = pick_text(value)
+                        if maybe:
+                            return maybe
+
+                # 某些接口会把 opid 放在 URL 里
+                for key in ("url", "downloadUrl", "download_url"):
+                    raw_url = pick_text(node.get(key))
+                    if not raw_url:
+                        continue
+                    m = re.search(r"[?&]opid=([^&]+)", raw_url)
+                    if m:
+                        return m.group(1)
+
                 for v in node.values():
                     maybe = walk(v)
                     if maybe:
@@ -641,7 +660,7 @@ class DIBagDownloader:
                     if maybe:
                         return maybe
                 return None
-            return pick_uuid_from_scalar(node)
+            return None
 
         return walk(data)
 

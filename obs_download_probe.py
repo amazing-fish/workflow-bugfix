@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -61,6 +62,52 @@ def _extract_filename(request_body: dict) -> str:
     return "downloaded.bag"
 
 
+def _extract_obs_id_from_response(data) -> str | None:
+    def pick_text(v):
+        if v is None or isinstance(v, (dict, list)):
+            return None
+        text = str(v).strip()
+        return text or None
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key in ("result", "opid", "obsId", "obs_id", "operationId"):
+                if key not in node:
+                    continue
+                value = node.get(key)
+                if isinstance(value, (dict, list)):
+                    nested = walk(value)
+                    if nested:
+                        return nested
+                else:
+                    maybe = pick_text(value)
+                    if maybe:
+                        return maybe
+
+            for key in ("url", "downloadUrl", "download_url"):
+                raw_url = pick_text(node.get(key))
+                if not raw_url:
+                    continue
+                m = re.search(r"[?&]opid=([^&]+)", raw_url)
+                if m:
+                    return m.group(1)
+
+            for v in node.values():
+                nested = walk(v)
+                if nested:
+                    return nested
+            return None
+        if isinstance(node, list):
+            for item in node:
+                nested = walk(item)
+                if nested:
+                    return nested
+            return None
+        return None
+
+    return walk(data)
+
+
 def run_probe(config_path: str | Path) -> dict:
     config_path = Path(config_path)
     cfg_all = json.loads(config_path.read_text(encoding="utf-8"))
@@ -96,7 +143,8 @@ def run_probe(config_path: str | Path) -> dict:
     )
     resp.raise_for_status()
     data = resp.json()
-    obs_id = data.get("result")
+    # 强制从 getObsId 响应动态提取，避免手工拷贝 opid
+    obs_id = _extract_obs_id_from_response(data)
     if not obs_id:
         raise RuntimeError(f"getObsId 未返回 result: {data}")
 
@@ -127,6 +175,7 @@ def run_probe(config_path: str | Path) -> dict:
     result = {
         "status": "ok",
         "obs_id": str(obs_id),
+        "obs_id_source": "getObsId_response",
         "download_url_host": urlparse(download_url).netloc,
         "saved_file": str(target),
         "saved_size": target.stat().st_size,
