@@ -50,6 +50,36 @@ python workflow.py --config config.json --ai-only
 python workflow.py --config config.json --decode-only --row-dir outputs/row2
 ```
 
+
+### bag 下载兼容性维测（新增）
+
+当出现下载结果仅有 22 字节 zip 头（典型 `PK\x05\x06`）时，可先运行维测脚本探索兼容参数组合：
+
+```bash
+python bag_probe.py \
+  --config config.json \
+  --bucket yw-ads-eval-gy1 \
+  --remote-path "obs://yw-ads-eval-gy1/carjam_etoe/2026/03/12/6B5DDE903E65461A97454C6AEFDEEFE6/archive/camera_encoded_10.bag" \
+  --user-name h00000668 \
+  --obs-id "290c96ee-95ff-4320-026b-031e5f92135c" \
+  --out outputs/bag_probe_report.json
+```
+
+脚本会自动：
+- 探测 `downloadMenu` 是否返回有效 `obs_download_url`。
+- 对 `getObsId` 做**路径形态矩阵**探测：`obs://`、`/bucket/...`、`/no_bucket/...`、`bucket/...`。
+- 对每种路径形态，组合多种负载（minimal / browser_like / browser_like_size / minimal_dataset）。
+  - 仅当传入 `--file-size` 时，才会启用 `browser_like_size` 分支，避免无效重复请求。
+- 对每个可用 `obs_id` 发起下载并识别：
+  - 原始 ROS bag（`#ROSBAG`）
+  - zip 包内含 `.bag`
+  - 22 字节空 zip（高概率服务端返回空归档）
+  - 0 字节空 body（高概率 opid 与文件映射失效）
+- 自动输出 `analysis` 建议，并按质量优先级推荐方案（`rosbag` > `zip_with_bag`）。
+
+补充：如你在 F12 看到 `files[].size`，可带上 `--file-size 11513453`，脚本会验证带 size 的 payload 分支。
+
+维测结果会写入 `outputs/bag_probe_report.json`，用于后续确定主流程应采用的下载参数。
 ### GUI 监控面板
 
 ```bash
@@ -141,6 +171,7 @@ outputs/
 | 现象 | 可能原因 | 排查建议 |
 |------|----------|----------|
 | 所有 bag 下载异常 | `_looks_like_zip` 误判 | 确认 bag.py 版本包含 PK header 修复 |
+| 下载返回 22 字节 zip 或 0 字节 body | `getObsId` payload/path 形态不兼容 | 优先使用 `browser_like + /bucket/...` 形态（见 `bag.py` 新版候选策略） |
 | 401/403 错误 | Token/Cookie 过期 | 更新 `browser_headers` 中的 Authorization 和 Cookie |
 | 连接超时 | 网络不通或 VPN 未连接 | 检查内网连通性，调整 `timeout_sec` |
 | zip 解压失败 | 服务端返回异常响应 | 查看 `download_summary.json` 中的错误详情 |

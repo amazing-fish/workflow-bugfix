@@ -545,16 +545,53 @@ class DIBagDownloader:
     def _get_obs_id(self, bucket: str, remote_path: str, dataset_name: str | None = None) -> str:
         url = f"{self.base_url}/rivulet/v1/dataDownload/getObsId"
         headers = self._headers_for("rivulet")
-        payload = {"files": [{"path": remote_path}], "bucket": bucket}
+        user_name = str(self.browser_headers.get("userName") or "").strip()
+        file_name = Path(remote_path).name
+        slash_bucket_path = remote_path if remote_path.startswith("/") else f"/{remote_path}"
+
+        payload_candidates: list[tuple[str, dict[str, Any]]] = [
+            (
+                "browser_like_slash_bucket",
+                {
+                    "files": [{"name": file_name, "type": "file", "path": slash_bucket_path}],
+                    "dataType": [],
+                    "bucket": bucket,
+                    **({"userName": user_name} if user_name else {}),
+                },
+            ),
+            (
+                "minimal_slash_bucket",
+                {
+                    "files": [{"path": slash_bucket_path}],
+                    "bucket": bucket,
+                },
+            ),
+            (
+                "minimal_legacy",
+                {
+                    "files": [{"path": remote_path}],
+                    "bucket": bucket,
+                },
+            ),
+        ]
+
         if dataset_name:
-            payload["datasetName"] = dataset_name
-        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        data = resp.json()
-        obs_id = data.get("result")
-        if not obs_id:
-            raise RuntimeError(f"getObsId 未返回 result: {data}")
-        return str(obs_id)
+            for _, payload in payload_candidates:
+                payload["datasetName"] = dataset_name
+
+        last_data: dict[str, Any] = {}
+        for case_name, payload in payload_candidates:
+            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+            resp.raise_for_status()
+            data = resp.json()
+            last_data = data if isinstance(data, dict) else {}
+            obs_id = last_data.get("result")
+            if obs_id:
+                self._debug_print(f"[DEBUG] getObsId case={case_name} success")
+                return str(obs_id)
+            self._debug_print(f"[DEBUG] getObsId case={case_name} failed: {data}")
+
+        raise RuntimeError(f"getObsId 未返回 result（全部候选均失败）: {last_data}")
 
     def _download_by_obs_id(self, obs_download_url: str, obs_id: str, save_dir: Path, save_name: str) -> dict[str, Any]:
         save_dir.mkdir(parents=True, exist_ok=True)
