@@ -61,6 +61,8 @@ python bag_probe.py \
   --bucket yw-ads-eval-gy1 \
   --remote-path "obs://yw-ads-eval-gy1/carjam_etoe/2026/03/12/6B5DDE903E65461A97454C6AEFDEEFE6/archive/camera_encoded_10.bag" \
   --user-name h00000668 \
+  --headers-file ./f12_headers.json \
+  --exact-headers \
   --obs-id "290c96ee-95ff-4320-026b-031e5f92135c" \
   --out outputs/bag_probe_report.json
 ```
@@ -76,6 +78,8 @@ python bag_probe.py \
   - 22 字节空 zip（高概率服务端返回空归档）
   - 0 字节空 body（高概率 opid 与文件映射失效）
 - 自动输出 `analysis` 建议，并按质量优先级推荐方案（`rosbag` > `zip_with_bag`）。
+- 支持读取你这次 F12 成功请求头进行重放探测：`--headers-file`（或分别传 `--menu-headers-file` / `--getobsid-headers-file` / `--download-headers-file`）。
+  - 配合 `--exact-headers` 可严格只使用提供的请求头，验证“带浏览器原始头是否可下载”。
 
 补充：如你在 F12 看到 `files[].size`，可带上 `--file-size 11513453`，脚本会验证带 size 的 payload 分支。
 

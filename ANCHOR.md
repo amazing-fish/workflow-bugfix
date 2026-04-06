@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.8`
+- 当前版本：`v0.3.9`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,12 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.9` `bugfix`（2026-04-06）
+  - `bag_probe.py` 增加“成功请求头重放”能力：
+    - 新增 `--headers-file`（通用）及 `--menu-headers-file` / `--getobsid-headers-file` / `--download-headers-file`（分接口）。
+    - 新增 `--exact-headers`，可严格按 F12 请求头发起探测，不与配置头混合。
+    - 报告输入区增加 header keys 回显，便于核对脚本实际使用的请求头集合。
+
 - `v0.3.8` `bugfix`（2026-04-06）
   - 基于维测结论修复 `bag.py` 的 `getObsId` 取值策略：
     - 增加候选 payload 顺序：`browser_like_slash_bucket` → `minimal_slash_bucket` → `minimal_legacy`。

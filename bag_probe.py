@@ -42,19 +42,44 @@ class BagDownloadProbe:
             **self.browser_headers,
         }
 
-    def _headers_for(self, platform: str, json_body: bool = True) -> dict[str, str]:
-        headers = dict(self.common_headers)
-        headers["Deepdata-platform"] = platform
-        if json_body:
+    def _headers_for(
+        self,
+        platform: str,
+        json_body: bool = True,
+        override_headers: dict[str, Any] | None = None,
+        exact_headers: bool = False,
+    ) -> dict[str, str]:
+        if exact_headers and override_headers:
+            headers = {str(k): str(v) for k, v in override_headers.items() if v is not None}
+        else:
+            headers = dict(self.common_headers)
+            if override_headers:
+                headers.update({str(k): str(v) for k, v in override_headers.items() if v is not None})
+
+        if "Deepdata-platform" not in headers:
+            headers["Deepdata-platform"] = platform
+        if json_body and "Content-Type" not in headers:
             headers["Content-Type"] = "application/json"
         return headers
 
-    def _post(self, url: str, payload: dict[str, Any], platform: str) -> dict[str, Any]:
+    def _post(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        platform: str,
+        override_headers: dict[str, Any] | None = None,
+        exact_headers: bool = False,
+    ) -> dict[str, Any]:
         t0 = time.time()
         resp = self.session.post(
             url,
             json=payload,
-            headers=self._headers_for(platform),
+            headers=self._headers_for(
+                platform,
+                json_body=True,
+                override_headers=override_headers,
+                exact_headers=exact_headers,
+            ),
             verify=self.verify_ssl,
             timeout=self.timeout_sec,
         )
@@ -135,10 +160,21 @@ class BagDownloadProbe:
             return detail_json.get(key, default)
         return default
 
-    def resolve_download_menu(self, bucket: str) -> ProbeResult:
+    def resolve_download_menu(
+        self,
+        bucket: str,
+        request_headers: dict[str, Any] | None = None,
+        exact_headers: bool = False,
+    ) -> ProbeResult:
         url = f"{self.base_url}/rivulet/v1/dataDownload/downloadMenu"
         payload = {"bucketName": bucket}
-        detail = self._post(url, payload, platform="rivulet")
+        detail = self._post(
+            url,
+            payload,
+            platform="rivulet",
+            override_headers=request_headers,
+            exact_headers=exact_headers,
+        )
         data = detail.get("json") or {}
         obs_download_url = ((data.get("data") or {}).get("obs_download_url")) if isinstance(data, dict) else None
         detail["obs_download_url"] = obs_download_url
@@ -152,6 +188,8 @@ class BagDownloadProbe:
         data_type: list[str] | None = None,
         dataset_name: str | None = None,
         file_size: int | None = None,
+        request_headers: dict[str, Any] | None = None,
+        exact_headers: bool = False,
     ) -> list[ProbeResult]:
         url = f"{self.base_url}/rivulet/v1/dataDownload/getObsId"
         data_type = data_type if data_type is not None else []
@@ -189,7 +227,13 @@ class BagDownloadProbe:
 
         results: list[ProbeResult] = []
         for name, payload in candidates:
-            detail = self._post(url, payload, platform="rivulet")
+            detail = self._post(
+                url,
+                payload,
+                platform="rivulet",
+                override_headers=request_headers,
+                exact_headers=exact_headers,
+            )
             detail["request_payload"] = payload
             detail["path_style"] = name.split("::")[-1]
             obs_id = self._extract_result_field(detail.get("json"), "result")
@@ -198,9 +242,21 @@ class BagDownloadProbe:
             results.append(ProbeResult(name=f"getObsId::{name}", ok=ok, detail=detail))
         return results
 
-    def probe_download(self, obs_download_url: str, obs_id: str, request_name: str) -> ProbeResult:
+    def probe_download(
+        self,
+        obs_download_url: str,
+        obs_id: str,
+        request_name: str,
+        request_headers: dict[str, Any] | None = None,
+        exact_headers: bool = False,
+    ) -> ProbeResult:
         url = obs_download_url.rstrip("/") + "/obs/v1/files/download?opid=" + obs_id
-        headers = self._headers_for("rivulet", json_body=False)
+        headers = self._headers_for(
+            "rivulet",
+            json_body=False,
+            override_headers=request_headers,
+            exact_headers=exact_headers,
+        )
         t0 = time.time()
         resp = self.session.get(url, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
         elapsed = round((time.time() - t0) * 1000, 1)
@@ -287,6 +343,10 @@ class BagDownloadProbe:
         data_type: list[str] | None = None,
         dataset_name: str | None = None,
         file_size: int | None = None,
+        getobsid_headers: dict[str, Any] | None = None,
+        download_headers: dict[str, Any] | None = None,
+        menu_headers: dict[str, Any] | None = None,
+        exact_headers: bool = False,
     ) -> dict[str, Any]:
         report: dict[str, Any] = {
             "input": {
@@ -298,11 +358,19 @@ class BagDownloadProbe:
                 "obs_id": obs_id,
                 "data_type": data_type or [],
                 "file_size": file_size,
+                "exact_headers": exact_headers,
+                "menu_header_keys": sorted(list((menu_headers or {}).keys())),
+                "getobsid_header_keys": sorted(list((getobsid_headers or {}).keys())),
+                "download_header_keys": sorted(list((download_headers or {}).keys())),
             },
             "results": [],
         }
 
-        menu_result = self.resolve_download_menu(bucket)
+        menu_result = self.resolve_download_menu(
+            bucket=bucket,
+            request_headers=menu_headers,
+            exact_headers=exact_headers,
+        )
         report["results"].append(asdict(menu_result))
         if not obs_download_url:
             obs_download_url = menu_result.detail.get("obs_download_url")
@@ -314,6 +382,8 @@ class BagDownloadProbe:
             data_type=data_type,
             dataset_name=dataset_name,
             file_size=file_size,
+            request_headers=getobsid_headers,
+            exact_headers=exact_headers,
         )
         report["results"].extend(asdict(x) for x in obs_results)
 
@@ -333,7 +403,13 @@ class BagDownloadProbe:
 
         if obs_download_url:
             for oid, alias in dedup.items():
-                dl = self.probe_download(obs_download_url=obs_download_url, obs_id=oid, request_name=alias)
+                dl = self.probe_download(
+                    obs_download_url=obs_download_url,
+                    obs_id=oid,
+                    request_name=alias,
+                    request_headers=download_headers,
+                    exact_headers=exact_headers,
+                )
                 report["results"].append(asdict(dl))
         else:
             report["results"].append(
@@ -367,14 +443,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--obs-id", default=None, help="可选：手动指定 obs_id 直接验证下载")
     p.add_argument("--obs-download-url", default=None, help="可选：手动指定 downloadMenu 返回的 obs_download_url")
     p.add_argument("--data-type", default="", help="逗号分隔的 dataType 列表，如 raw,bag")
+    p.add_argument("--headers-file", default=None, help="可选：通用请求头 JSON 文件（同时用于 menu/getObsId/download）")
+    p.add_argument("--menu-headers-file", default=None, help="可选：downloadMenu 请求头 JSON 文件")
+    p.add_argument("--getobsid-headers-file", default=None, help="可选：getObsId 请求头 JSON 文件")
+    p.add_argument("--download-headers-file", default=None, help="可选：download 请求头 JSON 文件")
+    p.add_argument("--exact-headers", action="store_true", help="若开启，仅使用提供的 headers（不自动合并 config.browser_headers）")
     p.add_argument("--timeout-sec", type=int, default=30, help="请求超时秒数")
     p.add_argument("--out", default="outputs/bag_probe_report.json", help="维测报告输出路径")
     return p
 
 
+def _load_headers_json(path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    p = Path(path)
+    with open(p, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"headers 文件必须是 JSON object: {path}")
+    return data
+
+
 def main() -> None:
     args = build_parser().parse_args()
     data_type = [x.strip() for x in args.data_type.split(",") if x.strip()]
+    common_headers = _load_headers_json(args.headers_file)
+    menu_headers = _load_headers_json(args.menu_headers_file) or common_headers
+    getobsid_headers = _load_headers_json(args.getobsid_headers_file) or common_headers
+    download_headers = _load_headers_json(args.download_headers_file) or common_headers
 
     probe = BagDownloadProbe(config_path=args.config, timeout_sec=args.timeout_sec)
     report = probe.run(
@@ -387,6 +483,10 @@ def main() -> None:
         data_type=data_type,
         dataset_name=args.dataset_name,
         file_size=args.file_size,
+        menu_headers=menu_headers,
+        getobsid_headers=getobsid_headers,
+        download_headers=download_headers,
+        exact_headers=args.exact_headers,
     )
 
     print(f"[INFO] 维测完成，报告: {args.out}")
