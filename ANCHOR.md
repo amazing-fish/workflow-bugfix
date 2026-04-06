@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.4`
+- 当前版本：`v0.3.6`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,22 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.6` `bugfix`（2026-04-06）
+  - 修复 `taskId` 分区日期来源错误：
+    - 废弃基于时间戳/时间字符串推测目录日期的策略；
+    - 改为从 `querySubTaskByType` 返回的 `logfilePath` 直接解析准确分区路径与 bucket；
+    - 基于 `logfilePath` 中的 `carjam_etoe/YYYY/MM/DD/<taskId>` 精确拼接 `archive`，用于后续 `queryMenu` 检索与 `getObsId`。
+
+- `v0.3.5` `bugfix`（2026-04-06）
+  - 修复 DI 链路下载定位不一致问题（优先走 F12 实测链路）：
+    - 新增 `onlineVisualQuery` 预查询：先用链接 `subSeqno` 获取标准化 `result.subSeqno`。
+    - `querySubTaskByType` 改为以 `subSeqno` 为主检索，并保留分页兜底（最多 20 页）。
+    - 下载定位新增 `taskId -> queryMenu -> getObsId(文件模式)` 路径：
+      - 基于 `taskId` 生成 `carjam_etoe/YYYY/MM/DD/<taskId>/archive` 候选目录；
+      - 自动组合候选日期（时间戳/字符串/tideName，含 ±1 天）以适配日期分区差异；
+      - 通过 `queryMenu` 命中具体 `*.bag` 文件后，按文件详情请求 `getObsId`。
+    - 保留旧 `transfer_path` 与 `event/list` 回退，确保历史链路兼容。
+
 - `v0.3.4` `bugfix`（2026-04-06）
   - 修复部分 bag 下载前置定位失败：
     - `querySubTaskByType` 增加分页检索（最多 20 页），避免仅查首页导致 `subSeqNo` 命中失败。
