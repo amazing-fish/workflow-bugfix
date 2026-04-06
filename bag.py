@@ -448,56 +448,58 @@ class DIBagDownloader:
         url = f"{self.base_url}/{locator['platform']}/v1/carjam/querySubTaskByType"
         headers = self._headers_for(locator["platform"])
         target_sub_seqno = self._normalize_seqno(locator["sub_seqno"])
-        max_pages = 20
-        page_size = 100
-        found_subtask = None
-        found_subtask_without_path = False
+        payload = {
+            "subSeqno": [locator["sub_seqno"]],
+            "pageNum": 1,
+            "pageSize": 20,
+        }
+        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("list") or []
+        if not items:
+            raise RuntimeError(f"querySubTaskByType 返回空: subSeqno={locator['sub_seqno']}")
 
-        for page_num in range(1, max_pages + 1):
-            payload = {
-                "orderByTideName": True,
-                "pageNum": page_num,
-                "pageSize": page_size,
-                "seqno": [locator["seqno"]],
+        matched_item = None
+        for item in items:
+            item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
+            if item_sub_seqno == target_sub_seqno:
+                matched_item = item
+                break
+        if not matched_item:
+            raise RuntimeError(f"querySubTaskByType 未命中 subSeqno={locator['sub_seqno']}")
+
+        task_id = str(matched_item.get("taskId") or "").strip()
+        transfer_path = self._pick_transfer_path(matched_item)
+        if transfer_path:
+            return {
+                "transfer_path": str(transfer_path),
+                "data_segment": str(matched_item.get("tideName") or locator["sub_seqno"]),
+                "dataset_name": str(matched_item.get("tideName") or locator["sub_seqno"]),
+                "add_slash_before_archive": False,
+                "transfer_path_source": "querySubTaskByType",
+                "task_id": task_id or None,
             }
-            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-            resp.raise_for_status()
-            data = resp.json()
-            items = data.get("list") or []
-            if page_num == 1 and not items:
-                raise RuntimeError(f"querySubTaskByType 返回空: seqno={locator['seqno']}")
-            if not items:
-                break
 
-            for item in items:
-                item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
-                if item_sub_seqno != target_sub_seqno:
-                    continue
-                transfer_path = self._pick_transfer_path(item)
-                if transfer_path:
-                    found_subtask = {
-                        "transfer_path": str(transfer_path),
-                        "data_segment": str(item.get("tideName") or locator["sub_seqno"]),
-                        "dataset_name": str(item.get("tideName") or locator["sub_seqno"]),
-                        "add_slash_before_archive": False,
-                        "transfer_path_source": "querySubTaskByType",
-                    }
-                    break
-                found_subtask_without_path = True
-
-            if found_subtask:
-                return found_subtask
-            if len(items) < page_size:
-                break
-
-        if found_subtask_without_path:
-            fallback_data_name = locator.get("data_name") or locator.get("sub_seqno")
+        # 关键兜底：querySubTaskByType 有 taskId 但无 transferPath 时，先尝试按 taskId 查 event/list
+        if task_id:
             try:
-                return self._resolve_by_event_list(str(fallback_data_name), key="id")
+                fallback = self._resolve_by_event_list(task_id, key="id")
+                fallback["task_id"] = task_id
+                fallback["transfer_path_source"] = "event/list(taskId)"
+                return fallback
             except Exception:
-                raise RuntimeError("命中 subtask，但缺少 carjamFilePath/replayFilePath，且 event/list 回退失败")
+                pass
 
-        raise RuntimeError(f"在 seqno={locator['seqno']} 下未找到 subSeqNo={locator['sub_seqno']}（已翻页检索）")
+        fallback_data_name = locator.get("data_name") or locator.get("sub_seqno")
+        try:
+            fallback = self._resolve_by_event_list(str(fallback_data_name), key="id")
+            if task_id:
+                fallback["task_id"] = task_id
+            fallback["transfer_path_source"] = "event/list(fallback)"
+            return fallback
+        except Exception:
+            raise RuntimeError("命中 subtask，但缺少 transferPath，且 event/list 回退失败")
 
     @staticmethod
     def _normalize_seqno(value: Any) -> str:
@@ -543,6 +545,10 @@ class DIBagDownloader:
         m = self.CASE_HEX_PATTERN.search(core)
         if m:
             case_hex = m.group(1).upper()
+        if not case_hex:
+            task_id = str(dataset.get("task_id") or "").strip()
+            if self.CASE_HEX_PATTERN.fullmatch(task_id):
+                case_hex = task_id.upper()
 
         data_path = None
         if core:

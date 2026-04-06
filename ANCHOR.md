@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.10`
+- 当前版本：`v0.3.11`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,12 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.11` `bugfix`（2026-04-06）
+  - 对齐 `querySubTaskByType` 实际协议并修复 `taskId` 关键链路：
+    - 请求负载调整为 `{"subSeqno":[...],"pageNum":1,"pageSize":20}`。
+    - 命中项优先读取 `taskId`，当缺少 transferPath 时，优先以 `taskId` 回退查询 `event/list`。
+    - `case_hex` 在 transferPath 缺失时可由 `taskId` 回填，避免关键 case 标识丢失。
+
 - `v0.3.10` `bugfix`（2026-04-06）
   - 明确并固化 `dataPath`/`CASE_HEX` 来源链路，辅助修复下载排障：
     - `bag.py` 在 `dataset` 中新增 `bucket_name/case_hex/data_path`，来源于 `transfer_path` 解析。
