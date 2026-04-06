@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.3`
+- 当前版本：`v0.3.7`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,35 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.7` `bugfix`（2026-04-06）
+  - 修复 `querySubTaskByType` 首屏返回空导致的误失败：
+    - 根因：部分 case 在携带 `seqno` 过滤时返回空列表，导致提前报错；
+    - 修复：改为双阶段检索：先 `subSeqno + seqno`，若第一页空则自动降级为仅 `subSeqno` 再检索；
+    - 保留分页匹配逻辑，命中 `subSeqNo` 即返回 subtask，避免第 15 行这类空结果误判。
+
+- `v0.3.6` `bugfix`（2026-04-06）
+  - 修复 `taskId` 分区日期来源错误：
+    - 废弃基于时间戳/时间字符串推测目录日期的策略；
+    - 改为从 `querySubTaskByType` 返回的 `logfilePath` 直接解析准确分区路径与 bucket；
+    - 基于 `logfilePath` 中的 `carjam_etoe/YYYY/MM/DD/<taskId>` 精确拼接 `archive`，用于后续 `queryMenu` 检索与 `getObsId`。
+
+- `v0.3.5` `bugfix`（2026-04-06）
+  - 修复 DI 链路下载定位不一致问题（优先走 F12 实测链路）：
+    - 新增 `onlineVisualQuery` 预查询：先用链接 `subSeqno` 获取标准化 `result.subSeqno`。
+    - `querySubTaskByType` 改为以 `subSeqno` 为主检索，并保留分页兜底（最多 20 页）。
+    - 下载定位新增 `taskId -> queryMenu -> getObsId(文件模式)` 路径：
+      - 基于 `taskId` 生成 `carjam_etoe/YYYY/MM/DD/<taskId>/archive` 候选目录；
+      - 自动组合候选日期（时间戳/字符串/tideName，含 ±1 天）以适配日期分区差异；
+      - 通过 `queryMenu` 命中具体 `*.bag` 文件后，按文件详情请求 `getObsId`。
+    - 保留旧 `transfer_path` 与 `event/list` 回退，确保历史链路兼容。
+
+- `v0.3.4` `bugfix`（2026-04-06）
+  - 修复部分 bag 下载前置定位失败：
+    - `querySubTaskByType` 增加分页检索（最多 20 页），避免仅查首页导致 `subSeqNo` 命中失败。
+    - `subSeqNo` 匹配增强：兼容 `subSeqNo/subSeqno` 字段并做大小写/空白归一。
+    - transfer path 提取增强：除 `carjamFilePath/replayFilePath` 外，兼容 `transferFilePath/filePath`。
+    - 命中 subtask 但路径缺失时，增加 `event/list` 回退解析，降低因接口字段不齐导致的失败率。
+
 - `v0.3.3` `bugfix`（2026-04-03）
   - AI 重试策略增强：
     - 除 `None` 外，若结构化输出出现 enum 非法值，也会触发重试。
