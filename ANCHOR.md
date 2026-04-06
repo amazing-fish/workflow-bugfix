@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.9`
+- 当前版本：`v0.3.10`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,12 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.10` `bugfix`（2026-04-06）
+  - 新增 `generate_f12_headers.py`：
+    - 支持将 3 份 F12 cURL（`downloadMenu/getObsId/download`）自动转换为 `menu/getobsid/download` 三份 headers JSON。
+    - 自动额外生成 `common_headers.json`（三接口公共头交集），便于快速复用。
+    - 过滤 `:pseudo headers`、`Host`、`Content-Length` 等易冲突头，降低重放失败率。
+
 - `v0.3.9` `bugfix`（2026-04-06）
   - `bag_probe.py` 增加“成功请求头重放”能力：
     - 新增 `--headers-file`（通用）及 `--menu-headers-file` / `--getobsid-headers-file` / `--download-headers-file`（分接口）。

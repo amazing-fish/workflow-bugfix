@@ -84,6 +84,24 @@ python bag_probe.py \
 补充：如你在 F12 看到 `files[].size`，可带上 `--file-size 11513453`，脚本会验证带 size 的 payload 分支。
 
 维测结果会写入 `outputs/bag_probe_report.json`，用于后续确定主流程应采用的下载参数。
+
+#### 从 3 份 cURL 一键生成 headers JSON（新增）
+
+先在 F12 Network 中分别复制 3 条请求（downloadMenu/getObsId/download）的 **Copy as cURL**，保存为 3 个文本文件，然后执行：
+
+```bash
+python generate_f12_headers.py \
+  --menu-curl-file ./menu.curl.txt \
+  --getobsid-curl-file ./getobsid.curl.txt \
+  --download-curl-file ./download.curl.txt \
+  --out-dir ./f12_headers
+```
+
+脚本会输出：
+- `f12_headers/menu_headers.json`
+- `f12_headers/getobsid_headers.json`
+- `f12_headers/download_headers.json`
+- `f12_headers/common_headers.json`（三者公共交集，可选）
 ### GUI 监控面板
 
 ```bash
