@@ -41,6 +41,7 @@ class DIBagDownloader:
     """
 
     COLLISION_TS_PATTERN = re.compile(r"【碰撞时间】\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)")
+    CASE_HEX_PATTERN = re.compile(r"\b([0-9A-Fa-f]{32})\b")
 
     def __init__(self, config_path: str | Path):
         self.config_path = Path(config_path)
@@ -172,6 +173,7 @@ class DIBagDownloader:
         collision_info = self._extract_collision_info(checker_text)
         locator = self._parse_issue_link(issue_link)
         dataset = self._resolve_dataset(locator)
+        dataset = self._enrich_dataset_download_context(dataset)
 
         row_id = f"row{excel_row}"
         row_dir = self.output_root / row_id
@@ -478,6 +480,7 @@ class DIBagDownloader:
                         "data_segment": str(item.get("tideName") or locator["sub_seqno"]),
                         "dataset_name": str(item.get("tideName") or locator["sub_seqno"]),
                         "add_slash_before_archive": False,
+                        "transfer_path_source": "querySubTaskByType",
                     }
                     break
                 found_subtask_without_path = True
@@ -526,7 +529,35 @@ class DIBagDownloader:
             "data_segment": str(item.get("dataName") or value),
             "dataset_name": None,
             "add_slash_before_archive": True,
+            "transfer_path_source": "event/list",
         }
+
+    def _enrich_dataset_download_context(self, dataset: dict[str, Any]) -> dict[str, Any]:
+        transfer_path = str(dataset.get("transfer_path") or "")
+        core = transfer_path[6:] if transfer_path.startswith("obs://") else transfer_path
+        core = core.lstrip("/")
+        parts = core.split("/")
+        bucket = parts[0] if parts else ""
+        # transfer_path 形态通常为 obs://bucket/.../<CASE_HEX>/
+        case_hex = None
+        m = self.CASE_HEX_PATTERN.search(core)
+        if m:
+            case_hex = m.group(1).upper()
+
+        data_path = None
+        if core:
+            if core.endswith("/"):
+                data_path = "/" + core + "archive"
+            elif core.endswith("/archive"):
+                data_path = "/" + core
+            else:
+                data_path = "/" + core + "/archive"
+
+        out = dict(dataset)
+        out["bucket_name"] = bucket
+        out["case_hex"] = case_hex
+        out["data_path"] = data_path
+        return out
 
     # ---------------- download ----------------
 
@@ -620,6 +651,14 @@ class DIBagDownloader:
             "pageNum": int(query_menu_cfg.get("pageNum", 1)) if isinstance(query_menu_cfg, dict) else 1,
             "pageSize": int(query_menu_cfg.get("pageSize", 200)) if isinstance(query_menu_cfg, dict) else 200,
         }
+        case_hex = None
+        m = self.CASE_HEX_PATTERN.search(path_with_slash)
+        if m:
+            case_hex = m.group(1).upper()
+        self._debug_print(
+            f"[DEBUG] queryMenu 入参: bucket={bucket}, dataPath={payload['dataPath']}, "
+            f"case_hex={case_hex}, file={bag_name}"
+        )
 
         resp = self.session.post(query_menu_url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
         resp.raise_for_status()

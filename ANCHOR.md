@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.9`
+- 当前版本：`v0.3.10`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,12 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.10` `bugfix`（2026-04-06）
+  - 明确并固化 `dataPath`/`CASE_HEX` 来源链路，辅助修复下载排障：
+    - `bag.py` 在 `dataset` 中新增 `bucket_name/case_hex/data_path`，来源于 `transfer_path` 解析。
+    - `transfer_path` 增加来源标记（`querySubTaskByType` 或 `event/list`），便于定位“日志来自哪个接口”。
+    - `queryMenu` 调用前输出 `bucket/dataPath/case_hex/file` 调试信息，方便与 F12 请求逐项对比。
+
 - `v0.3.9` `bugfix`（2026-04-06）
   - 基于 `queryMenu -> getObsId` 链路进一步修复下载失败：
     - `bag.py` 新增 `queryMenu` 文件元信息查询（`name/type/path/size`），并将结果注入 `getObsId` 负载。

@@ -168,6 +168,10 @@ python obs_download_probe.py config.json
 
 当该探针验证通过后，`bag.py` 会复用 `config.json.obs_download_probe` 中的下载域名、请求头和 getObsId 请求体模板，降低“网页可下、本地脚本失败”的差异风险。
 
+`dataPath` 中的 32 位十六进制串（如 `6B5DDE903E65461A97454C6AEFDEEFE6`）并不是本地随机生成：
+- 来源是 DI 链接解析后通过 `querySubTaskByType` / `event/list` 拿到的 `transfer_path`（`obs://bucket/.../<CASE_HEX>/`）。
+- `bag.py` 会从 `transfer_path` 提取 `case_hex`，并拼接 `dataPath=/<bucket>/.../<CASE_HEX>/archive` 用于 `queryMenu`。
+
 ### 解码阶段
 
 | 现象 | 可能原因 | 排查建议 |
