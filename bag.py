@@ -442,34 +442,69 @@ class DIBagDownloader:
 
     def _resolve_by_seqno(self, locator: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}/{locator['platform']}/v1/carjam/querySubTaskByType"
-        payload = {
-            "orderByTideName": True,
-            "pageNum": 1,
-            "pageSize": 100,
-            "seqno": [locator["seqno"]],
-        }
         headers = self._headers_for(locator["platform"])
+        target_sub_seqno = self._normalize_seqno(locator["sub_seqno"])
+        max_pages = 20
+        page_size = 100
+        found_subtask = None
+        found_subtask_without_path = False
 
-        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("list") or []
-        if not items:
-            raise RuntimeError(f"querySubTaskByType 返回空: seqno={locator['seqno']}")
+        for page_num in range(1, max_pages + 1):
+            payload = {
+                "orderByTideName": True,
+                "pageNum": page_num,
+                "pageSize": page_size,
+                "seqno": [locator["seqno"]],
+            }
+            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("list") or []
+            if page_num == 1 and not items:
+                raise RuntimeError(f"querySubTaskByType 返回空: seqno={locator['seqno']}")
+            if not items:
+                break
 
-        for item in items:
-            if str(item.get("subSeqNo")) == str(locator["sub_seqno"]):
-                transfer_path = item.get("carjamFilePath") or item.get("replayFilePath")
-                if not transfer_path:
-                    raise RuntimeError("命中 subtask，但缺少 carjamFilePath/replayFilePath")
-                return {
-                    "transfer_path": str(transfer_path),
-                    "data_segment": str(item.get("tideName") or locator["sub_seqno"]),
-                    "dataset_name": str(item.get("tideName") or locator["sub_seqno"]),
-                    "add_slash_before_archive": False,
-                }
+            for item in items:
+                item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
+                if item_sub_seqno != target_sub_seqno:
+                    continue
+                transfer_path = self._pick_transfer_path(item)
+                if transfer_path:
+                    found_subtask = {
+                        "transfer_path": str(transfer_path),
+                        "data_segment": str(item.get("tideName") or locator["sub_seqno"]),
+                        "dataset_name": str(item.get("tideName") or locator["sub_seqno"]),
+                        "add_slash_before_archive": False,
+                    }
+                    break
+                found_subtask_without_path = True
 
-        raise RuntimeError(f"在 seqno={locator['seqno']} 下未找到 subSeqNo={locator['sub_seqno']}")
+            if found_subtask:
+                return found_subtask
+            if len(items) < page_size:
+                break
+
+        if found_subtask_without_path:
+            fallback_data_name = locator.get("data_name") or locator.get("sub_seqno")
+            try:
+                return self._resolve_by_event_list(str(fallback_data_name), key="id")
+            except Exception:
+                raise RuntimeError("命中 subtask，但缺少 carjamFilePath/replayFilePath，且 event/list 回退失败")
+
+        raise RuntimeError(f"在 seqno={locator['seqno']} 下未找到 subSeqNo={locator['sub_seqno']}（已翻页检索）")
+
+    @staticmethod
+    def _normalize_seqno(value: Any) -> str:
+        return str(value or "").strip().lower()
+
+    @staticmethod
+    def _pick_transfer_path(item: dict[str, Any]) -> Any:
+        for key in ("carjamFilePath", "replayFilePath", "transferFilePath", "filePath"):
+            val = item.get(key)
+            if val:
+                return val
+        return None
 
     def _resolve_by_event_list(self, value: str, key: str) -> dict[str, Any]:
         url = f"{self.base_url}/siphon/v1/file/event/list"
