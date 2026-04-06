@@ -515,25 +515,35 @@ class DIBagDownloader:
         max_pages = 20
         page_size = 20
         target_sub_seqno = self._normalize_seqno(sub_seqno)
-        for page_num in range(1, max_pages + 1):
-            payload: dict[str, Any] = {
-                "subSeqno": [sub_seqno],
-                "pageNum": page_num,
-                "pageSize": page_size,
-            }
-            if seqno:
-                payload["seqno"] = [seqno]
-            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-            resp.raise_for_status()
-            data = resp.json()
-            items = data.get("list") or []
-            if page_num == 1 and not items:
-                raise RuntimeError(f"querySubTaskByType 返回空: subSeqno={sub_seqno}")
-            for item in items:
-                item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
-                if item_sub_seqno == target_sub_seqno:
-                    return item
-            if len(items) < page_size:
+        search_modes: list[dict[str, Any]] = []
+        if seqno:
+            search_modes.append({"seqno": [seqno], "_label": "with_seqno"})
+        search_modes.append({"_label": "subseq_only"})
+
+        for mode in search_modes:
+            first_page_empty = False
+            for page_num in range(1, max_pages + 1):
+                payload: dict[str, Any] = {
+                    "subSeqno": [sub_seqno],
+                    "pageNum": page_num,
+                    "pageSize": page_size,
+                }
+                if mode.get("seqno"):
+                    payload["seqno"] = mode["seqno"]
+                resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("list") or []
+                if page_num == 1 and not items:
+                    first_page_empty = True
+                    break
+                for item in items:
+                    item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
+                    if item_sub_seqno == target_sub_seqno:
+                        return item
+                if len(items) < page_size:
+                    break
+            if not first_page_empty:
                 break
         raise RuntimeError(f"querySubTaskByType 未命中 subSeqNo={sub_seqno}（已翻页检索）")
 
