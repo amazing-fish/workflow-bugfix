@@ -34,6 +34,9 @@ pip install pandas openpyxl requests httpx truststore rosbags
 # 全流程：下载 → 解码 → AI 推理
 python workflow.py --config config.json
 
+# 仅验证 F12 抓包链路（getObsId + download?opid）可在本地成功下载 bag
+python obs_download_probe.py config.json
+
 # 仅下载 bag
 python workflow.py --config config.json --download-only
 
@@ -144,6 +147,31 @@ outputs/
 | 401/403 错误 | Token/Cookie 过期 | 更新 `browser_headers` 中的 Authorization 和 Cookie |
 | 连接超时 | 网络不通或 VPN 未连接 | 检查内网连通性，调整 `timeout_sec` |
 | zip 解压失败 | 服务端返回异常响应 | 查看 `download_summary.json` 中的错误详情 |
+
+### 本地抓包链路验证（推荐先执行）
+
+如 `bag.py` 下载异常，但网页可下载，先执行：
+
+```bash
+python obs_download_probe.py config.json
+```
+
+该脚本会严格按 `config.json.obs_download_probe` 中配置的请求头和请求体调用：
+- （可选）先调用 `queryMenu` 拉取文件元信息（name/type/path/size）
+- `getObsId`
+- `download?opid=...`
+- `opid`（obsid）始终从 `getObsId` 响应动态提取，不依赖手工粘贴。
+
+并将结果输出到：
+- `outputs/obs_probe/<bag_name>.bag`
+- `outputs/obs_probe/probe_result.json`
+
+当该探针验证通过后，`bag.py` 会复用 `config.json.obs_download_probe` 中的下载域名、请求头和 getObsId 请求体模板，降低“网页可下、本地脚本失败”的差异风险。
+
+`dataPath` 中的 32 位十六进制串（如 `6B5DDE903E65461A97454C6AEFDEEFE6`）并不是本地随机生成：
+- 来源是 DI 链接解析后通过 `querySubTaskByType` / `event/list` 拿到的 `transfer_path`（`obs://bucket/.../<CASE_HEX>/`）。
+- 当 `querySubTaskByType` 仅返回 `taskId` 时，`taskId` 本身会作为 `CASE_HEX` 参与后续 `dataPath` 构造与排障。
+- `bag.py` 会从 `transfer_path` 提取 `case_hex`，并拼接 `dataPath=/<bucket>/.../<CASE_HEX>/archive` 用于 `queryMenu`。
 
 ### 解码阶段
 

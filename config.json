@@ -31,6 +31,54 @@
   "output": {
     "root_dir": "outputs"
   },
+  "obs_download_probe": {
+    "enabled": true,
+    "verify_ssl": false,
+    "timeout_sec": 60,
+    "output_dir": "outputs/obs_probe",
+    "get_obs_id_url": "https://console.di.adscloud.yinwang.com/deepdata-entrypoint/rivulet/v1/dataDownload/getObsId",
+    "query_menu_url": "https://console.di.adscloud.yinwang.com/deepdata-entrypoint/rivulet/v1/dataDownload/queryMenu",
+    "download_base_url": "https://console.di.adscloud.yinwang.com/obs-download",
+    "query_menu": {
+      "enabled": true,
+      "dataStartTime": 0,
+      "pageNum": 1,
+      "pageSize": 200
+    },
+    "get_obs_id_headers": {
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "zh-CN",
+      "content-type": "application/json",
+      "deepdata-platform": "rivulet",
+      "deepdata-project": "driveinsight",
+      "deepdata-region": "RaD-prod",
+      "entrypoint-version": "v2",
+      "origin": "https://console.di.adscloud.yinwang.com",
+      "projectid": "1",
+      "servicename": "replay",
+      "userid": "34380",
+      "username": "h00000668",
+      "realname": "%E9%BB%84%E5%AD%90%E5%82%B2"
+    },
+    "download_headers": {
+      "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+      "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+      "upgrade-insecure-requests": "1"
+    },
+    "request_body": {
+      "files": [
+        {
+          "name": "camera_encoded_10.bag",
+          "type": "file",
+          "path": "/yw-ads-eval-gy1/carjam_etoe/2026/03/12/6B5DDE903E65461A97454C6AEFDEEFE6/archive/camera_encoded_10.bag",
+          "size": 11513453
+        }
+      ],
+      "dataType": [],
+      "bucket": "yw-ads-eval-gy1",
+      "userName": "h00000668"
+    }
+  },
   "sampling": {
     "before_frames": 4,
     "after_frames": 5

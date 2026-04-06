@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import copy
 import sys
 import time
 import zipfile
@@ -40,6 +41,7 @@ class DIBagDownloader:
     """
 
     COLLISION_TS_PATTERN = re.compile(r"【碰撞时间】\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)")
+    CASE_HEX_PATTERN = re.compile(r"\b([0-9A-Fa-f]{32})\b")
 
     def __init__(self, config_path: str | Path):
         self.config_path = Path(config_path)
@@ -61,6 +63,7 @@ class DIBagDownloader:
         self.download_backoff_max = float(retry_cfg.get("backoff_max_sec", 30.0))
 
         self.browser_headers = dict(self.cfg.get("browser_headers", {}))
+        self.obs_probe_cfg = dict(self.cfg.get("obs_download_probe", {}))
         self.excel_cfg = dict(self.cfg.get("excel", {}))
         self.output_cfg = dict(self.cfg.get("output", {}))
 
@@ -170,6 +173,7 @@ class DIBagDownloader:
         collision_info = self._extract_collision_info(checker_text)
         locator = self._parse_issue_link(issue_link)
         dataset = self._resolve_dataset(locator)
+        dataset = self._enrich_dataset_download_context(dataset)
 
         row_id = f"row{excel_row}"
         row_dir = self.output_root / row_id
@@ -179,7 +183,7 @@ class DIBagDownloader:
         download_stats: list[dict[str, Any]] = []
         try:
             bucket = self._extract_bucket_from_obs_path(dataset["transfer_path"])
-            obs_download_url = self._download_menu(bucket)
+            obs_download_url = self._resolve_obs_download_url(bucket)
 
             self._debug_print(f"[DEBUG] row={row_id} transfer_path={dataset['transfer_path']}")
             self._debug_print(f"[DEBUG] row={row_id} bucket={bucket}")
@@ -444,55 +448,58 @@ class DIBagDownloader:
         url = f"{self.base_url}/{locator['platform']}/v1/carjam/querySubTaskByType"
         headers = self._headers_for(locator["platform"])
         target_sub_seqno = self._normalize_seqno(locator["sub_seqno"])
-        max_pages = 20
-        page_size = 100
-        found_subtask = None
-        found_subtask_without_path = False
+        payload = {
+            "subSeqno": [locator["sub_seqno"]],
+            "pageNum": 1,
+            "pageSize": 20,
+        }
+        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("list") or []
+        if not items:
+            raise RuntimeError(f"querySubTaskByType 返回空: subSeqno={locator['sub_seqno']}")
 
-        for page_num in range(1, max_pages + 1):
-            payload = {
-                "orderByTideName": True,
-                "pageNum": page_num,
-                "pageSize": page_size,
-                "seqno": [locator["seqno"]],
+        matched_item = None
+        for item in items:
+            item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
+            if item_sub_seqno == target_sub_seqno:
+                matched_item = item
+                break
+        if not matched_item:
+            raise RuntimeError(f"querySubTaskByType 未命中 subSeqno={locator['sub_seqno']}")
+
+        task_id = str(matched_item.get("taskId") or "").strip()
+        transfer_path = self._pick_transfer_path(matched_item)
+        if transfer_path:
+            return {
+                "transfer_path": str(transfer_path),
+                "data_segment": str(matched_item.get("tideName") or locator["sub_seqno"]),
+                "dataset_name": str(matched_item.get("tideName") or locator["sub_seqno"]),
+                "add_slash_before_archive": False,
+                "transfer_path_source": "querySubTaskByType",
+                "task_id": task_id or None,
             }
-            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-            resp.raise_for_status()
-            data = resp.json()
-            items = data.get("list") or []
-            if page_num == 1 and not items:
-                raise RuntimeError(f"querySubTaskByType 返回空: seqno={locator['seqno']}")
-            if not items:
-                break
 
-            for item in items:
-                item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
-                if item_sub_seqno != target_sub_seqno:
-                    continue
-                transfer_path = self._pick_transfer_path(item)
-                if transfer_path:
-                    found_subtask = {
-                        "transfer_path": str(transfer_path),
-                        "data_segment": str(item.get("tideName") or locator["sub_seqno"]),
-                        "dataset_name": str(item.get("tideName") or locator["sub_seqno"]),
-                        "add_slash_before_archive": False,
-                    }
-                    break
-                found_subtask_without_path = True
-
-            if found_subtask:
-                return found_subtask
-            if len(items) < page_size:
-                break
-
-        if found_subtask_without_path:
-            fallback_data_name = locator.get("data_name") or locator.get("sub_seqno")
+        # 关键兜底：querySubTaskByType 有 taskId 但无 transferPath 时，先尝试按 taskId 查 event/list
+        if task_id:
             try:
-                return self._resolve_by_event_list(str(fallback_data_name), key="id")
+                fallback = self._resolve_by_event_list(task_id, key="id")
+                fallback["task_id"] = task_id
+                fallback["transfer_path_source"] = "event/list(taskId)"
+                return fallback
             except Exception:
-                raise RuntimeError("命中 subtask，但缺少 carjamFilePath/replayFilePath，且 event/list 回退失败")
+                pass
 
-        raise RuntimeError(f"在 seqno={locator['seqno']} 下未找到 subSeqNo={locator['sub_seqno']}（已翻页检索）")
+        fallback_data_name = locator.get("data_name") or locator.get("sub_seqno")
+        try:
+            fallback = self._resolve_by_event_list(str(fallback_data_name), key="id")
+            if task_id:
+                fallback["task_id"] = task_id
+            fallback["transfer_path_source"] = "event/list(fallback)"
+            return fallback
+        except Exception:
+            raise RuntimeError("命中 subtask，但缺少 transferPath，且 event/list 回退失败")
 
     @staticmethod
     def _normalize_seqno(value: Any) -> str:
@@ -524,7 +531,39 @@ class DIBagDownloader:
             "data_segment": str(item.get("dataName") or value),
             "dataset_name": None,
             "add_slash_before_archive": True,
+            "transfer_path_source": "event/list",
         }
+
+    def _enrich_dataset_download_context(self, dataset: dict[str, Any]) -> dict[str, Any]:
+        transfer_path = str(dataset.get("transfer_path") or "")
+        core = transfer_path[6:] if transfer_path.startswith("obs://") else transfer_path
+        core = core.lstrip("/")
+        parts = core.split("/")
+        bucket = parts[0] if parts else ""
+        # transfer_path 形态通常为 obs://bucket/.../<CASE_HEX>/
+        case_hex = None
+        m = self.CASE_HEX_PATTERN.search(core)
+        if m:
+            case_hex = m.group(1).upper()
+        if not case_hex:
+            task_id = str(dataset.get("task_id") or "").strip()
+            if self.CASE_HEX_PATTERN.fullmatch(task_id):
+                case_hex = task_id.upper()
+
+        data_path = None
+        if core:
+            if core.endswith("/"):
+                data_path = "/" + core + "archive"
+            elif core.endswith("/archive"):
+                data_path = "/" + core
+            else:
+                data_path = "/" + core + "/archive"
+
+        out = dict(dataset)
+        out["bucket_name"] = bucket
+        out["case_hex"] = case_hex
+        out["data_path"] = data_path
+        return out
 
     # ---------------- download ----------------
 
@@ -542,25 +581,213 @@ class DIBagDownloader:
             raise RuntimeError(f"downloadMenu 未返回 data.obs_download_url: {data}")
         return obs_download_url.rstrip("/")
 
+    def _resolve_obs_download_url(self, bucket_name: str) -> str:
+        probe_base_url = str(self.obs_probe_cfg.get("download_base_url") or "").strip().rstrip("/")
+        if probe_base_url:
+            return probe_base_url
+        return self._download_menu(bucket_name)
+
+    @staticmethod
+    def _build_obs_file_item(remote_path: str, default_size: int = 0) -> dict[str, Any]:
+        path_with_slash = remote_path if remote_path.startswith("/") else f"/{remote_path}"
+        file_name = Path(path_with_slash).name or "unknown.bag"
+        return {
+            "name": file_name,
+            "type": "file",
+            "path": path_with_slash,
+            "size": default_size,
+        }
+
+    def _build_get_obs_id_payload(self, bucket: str, remote_path: str, dataset_name: str | None = None) -> dict[str, Any]:
+        request_body_template = self.obs_probe_cfg.get("request_body")
+        if isinstance(request_body_template, dict):
+            payload = copy.deepcopy(request_body_template)
+            payload["bucket"] = bucket
+            files = payload.get("files") or []
+            template_file = files[0] if isinstance(files, list) and files else {}
+            size = int(template_file.get("size", 0) or 0)
+            payload["files"] = [self._build_obs_file_item(remote_path=remote_path, default_size=size)]
+            payload.setdefault("dataType", [])
+            if dataset_name:
+                payload.setdefault("datasetName", dataset_name)
+            return payload
+
+        payload = {
+            "files": [self._build_obs_file_item(remote_path=remote_path, default_size=0)],
+            "dataType": [],
+            "bucket": bucket,
+        }
+        if self.browser_headers.get("userName"):
+            payload["userName"] = str(self.browser_headers["userName"])
+        if dataset_name:
+            payload["datasetName"] = dataset_name
+        return payload
+
+    @staticmethod
+    def _extract_archive_data_path(remote_path: str) -> str:
+        path_with_slash = remote_path if remote_path.startswith("/") else f"/{remote_path}"
+        idx = path_with_slash.rfind("/archive/")
+        if idx == -1:
+            return str(Path(path_with_slash).parent)
+        return path_with_slash[: idx + len("/archive")]
+
+    def _query_menu_file_meta(self, bucket: str, remote_path: str) -> dict[str, Any] | None:
+        query_menu_url = str(self.obs_probe_cfg.get("query_menu_url") or f"{self.base_url}/rivulet/v1/dataDownload/queryMenu")
+        query_menu_cfg = self.obs_probe_cfg.get("query_menu") or {}
+        if isinstance(query_menu_cfg, dict) and query_menu_cfg.get("enabled") is False:
+            return None
+
+        headers = self._headers_for("rivulet")
+        probe_headers = self.obs_probe_cfg.get("get_obs_id_headers") or {}
+        if isinstance(probe_headers, dict):
+            headers.update(probe_headers)
+
+        path_with_slash = remote_path if remote_path.startswith("/") else f"/{remote_path}"
+        bag_name = Path(path_with_slash).name
+        payload = {
+            "queryStr": "",
+            "bucketName": bucket,
+            "dataPath": self._extract_archive_data_path(path_with_slash),
+            "fileType": 2,
+            "uploadId": "",
+            "dataType": "",
+            "defectId": "",
+            "dataSetId": "",
+            "dataStartTime": int(query_menu_cfg.get("dataStartTime", 0)) if isinstance(query_menu_cfg, dict) else 0,
+            "pageNum": int(query_menu_cfg.get("pageNum", 1)) if isinstance(query_menu_cfg, dict) else 1,
+            "pageSize": int(query_menu_cfg.get("pageSize", 200)) if isinstance(query_menu_cfg, dict) else 200,
+        }
+        case_hex = None
+        m = self.CASE_HEX_PATTERN.search(path_with_slash)
+        if m:
+            case_hex = m.group(1).upper()
+        self._debug_print(
+            f"[DEBUG] queryMenu 入参: bucket={bucket}, dataPath={payload['dataPath']}, "
+            f"case_hex={case_hex}, file={bag_name}"
+        )
+
+        resp = self.session.post(query_menu_url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+        resp.raise_for_status()
+        data = resp.json()
+        items = (
+            data.get("list")
+            or (data.get("data") or {}).get("list")
+            or (data.get("data") or {}).get("records")
+            or data.get("records")
+            or []
+        )
+        if not isinstance(items, list):
+            return None
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_path = str(item.get("path") or "").strip()
+            item_name = str(item.get("name") or "").strip()
+            if item_path == path_with_slash or item_name == bag_name:
+                return {
+                    "name": item_name or bag_name,
+                    "type": str(item.get("type") or "file"),
+                    "path": item_path or path_with_slash,
+                    "size": int(item.get("size") or 0),
+                }
+        return None
+
     def _get_obs_id(self, bucket: str, remote_path: str, dataset_name: str | None = None) -> str:
         url = f"{self.base_url}/rivulet/v1/dataDownload/getObsId"
         headers = self._headers_for("rivulet")
-        payload = {"files": [{"path": remote_path}], "bucket": bucket}
-        if dataset_name:
-            payload["datasetName"] = dataset_name
-        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        data = resp.json()
-        obs_id = data.get("result")
-        if not obs_id:
-            raise RuntimeError(f"getObsId 未返回 result: {data}")
-        return str(obs_id)
+        probe_headers = self.obs_probe_cfg.get("get_obs_id_headers") or {}
+        if isinstance(probe_headers, dict):
+            headers.update(probe_headers)
+        payload_primary = self._build_get_obs_id_payload(bucket=bucket, remote_path=remote_path, dataset_name=dataset_name)
+        try:
+            file_meta = self._query_menu_file_meta(bucket=bucket, remote_path=remote_path)
+            if file_meta:
+                payload_primary["files"] = [file_meta]
+                payload_primary.setdefault("dataType", [])
+                self._debug_print(f"[DEBUG] queryMenu 命中: name={file_meta['name']}, size={file_meta['size']}")
+        except Exception as e:
+            self._debug_print(f"[DEBUG] queryMenu 查询失败，继续走兜底 getObsId: {e}")
+        payload_fallback_min = {"files": [{"path": remote_path}], "bucket": bucket}
+        payload_fallback_slash = {"files": [{"path": remote_path if remote_path.startswith('/') else '/' + remote_path}], "bucket": bucket}
+        payloads = [payload_primary, payload_fallback_min, payload_fallback_slash]
+
+        errors: list[str] = []
+        for idx, payload in enumerate(payloads, start=1):
+            try:
+                resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+                resp.raise_for_status()
+                data = resp.json()
+                obs_id = self._extract_obs_id_from_get_obs_id_response(data)
+                if obs_id:
+                    self._debug_print(f"[DEBUG] getObsId 命中，payload_variant={idx}, obs_id={obs_id}")
+                    return obs_id
+                errors.append(f"variant{idx}: no_obs_id, resp={json.dumps(data, ensure_ascii=False)[:500]}")
+            except Exception as e:
+                errors.append(f"variant{idx}: {e}")
+                continue
+
+        raise RuntimeError(f"getObsId 未取到 obs_id: remote_path={remote_path}, errors={errors}")
+
+    def _extract_obs_id_from_get_obs_id_response(self, data: Any) -> str | None:
+        def pick_text(v: Any) -> str | None:
+            if v is None:
+                return None
+            if isinstance(v, (dict, list)):
+                return None
+            text = str(v).strip()
+            if not text:
+                return None
+            return text
+
+        def walk(node: Any) -> str | None:
+            if isinstance(node, dict):
+                for key in ("result", "opid", "obsId", "obs_id", "operationId"):
+                    if key not in node:
+                        continue
+                    value = node.get(key)
+                    if isinstance(value, (dict, list)):
+                        nested = walk(value)
+                        if nested:
+                            return nested
+                    else:
+                        maybe = pick_text(value)
+                        if maybe:
+                            return maybe
+
+                # 某些接口会把 opid 放在 URL 里
+                for key in ("url", "downloadUrl", "download_url"):
+                    raw_url = pick_text(node.get(key))
+                    if not raw_url:
+                        continue
+                    m = re.search(r"[?&]opid=([^&]+)", raw_url)
+                    if m:
+                        return m.group(1)
+
+                for v in node.values():
+                    maybe = walk(v)
+                    if maybe:
+                        return maybe
+                return None
+            if isinstance(node, list):
+                for item in node:
+                    maybe = walk(item)
+                    if maybe:
+                        return maybe
+                return None
+            return None
+
+        return walk(data)
 
     def _download_by_obs_id(self, obs_download_url: str, obs_id: str, save_dir: Path, save_name: str) -> dict[str, Any]:
         save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / save_name
         url = obs_download_url + "/obs/v1/files/download?opid=" + obs_id
         headers = self._headers_for("rivulet", json_body=False)
+        probe_download_headers = self.obs_probe_cfg.get("download_headers") or {}
+        if isinstance(probe_download_headers, dict):
+            headers.update(probe_download_headers)
+        headers.pop("Content-Type", None)
         last_error: Exception | None = None
         max_attempts = max(1, self.download_max_attempts)
         retry_reasons: list[str] = []
