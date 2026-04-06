@@ -7,6 +7,7 @@ import re
 import sys
 import time
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import parse_qs, urlparse
@@ -61,6 +62,12 @@ class DIBagDownloader:
         self.download_backoff_max = float(retry_cfg.get("backoff_max_sec", 30.0))
 
         self.browser_headers = dict(self.cfg.get("browser_headers", {}))
+        self.default_bucket = str(self.cfg.get("download", {}).get("bucket") or "yw-ads-eval-gy1")
+        self.default_rivulet_username = str(
+            self.cfg.get("download", {}).get("user_name")
+            or self.browser_headers.get("userName")
+            or ""
+        ).strip()
         self.excel_cfg = dict(self.cfg.get("excel", {}))
         self.output_cfg = dict(self.cfg.get("output", {}))
 
@@ -178,24 +185,31 @@ class DIBagDownloader:
         downloaded = {}
         download_stats: list[dict[str, Any]] = []
         try:
-            bucket = self._extract_bucket_from_obs_path(dataset["transfer_path"])
+            bucket = str(dataset.get("bucket") or self._extract_bucket_from_obs_path(dataset["transfer_path"]))
             obs_download_url = self._download_menu(bucket)
 
-            self._debug_print(f"[DEBUG] row={row_id} transfer_path={dataset['transfer_path']}")
+            self._debug_print(f"[DEBUG] row={row_id} transfer_path={dataset.get('transfer_path')}")
             self._debug_print(f"[DEBUG] row={row_id} bucket={bucket}")
             self._debug_print(f"[DEBUG] row={row_id} obs_download_url={obs_download_url}")
 
             for topic in self.topics:
-                remote_path = self._build_topic_bag_path(
-                    transfer_path=dataset["transfer_path"],
-                    topic=topic,
-                    add_slash_before_archive=dataset["add_slash_before_archive"],
-                )
-                obs_id = self._get_obs_id(
-                    bucket=bucket,
-                    remote_path=remote_path,
-                    dataset_name=dataset.get("dataset_name"),
-                )
+                topic_file = (dataset.get("topic_bag_files") or {}).get(topic)
+                if topic_file:
+                    obs_id = self._get_obs_id_by_file(
+                        bucket=bucket,
+                        file_item=topic_file,
+                    )
+                else:
+                    remote_path = self._build_topic_bag_path(
+                        transfer_path=dataset["transfer_path"],
+                        topic=topic,
+                        add_slash_before_archive=dataset["add_slash_before_archive"],
+                    )
+                    obs_id = self._get_obs_id(
+                        bucket=bucket,
+                        remote_path=remote_path,
+                        dataset_name=dataset.get("dataset_name"),
+                    )
                 dl_result = self._download_by_obs_id(
                     obs_download_url=obs_download_url,
                     obs_id=obs_id,
@@ -441,58 +455,171 @@ class DIBagDownloader:
         raise ValueError(f"链接无法解析为可用 case 标识: {locator['raw_link']}")
 
     def _resolve_by_seqno(self, locator: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url}/{locator['platform']}/v1/carjam/querySubTaskByType"
-        headers = self._headers_for(locator["platform"])
-        target_sub_seqno = self._normalize_seqno(locator["sub_seqno"])
-        max_pages = 20
-        page_size = 100
-        found_subtask = None
-        found_subtask_without_path = False
+        canonical_sub_seqno = self._query_online_visual_subseqno(
+            platform=locator["platform"],
+            sub_seqno=locator["sub_seqno"],
+        )
+        subtask = self._query_subtask_by_type(
+            platform=locator["platform"],
+            sub_seqno=canonical_sub_seqno,
+            seqno=locator["seqno"],
+        )
+        if not subtask.get("taskId"):
+            raise RuntimeError(f"querySubTaskByType 未返回 taskId: subSeqNo={canonical_sub_seqno}")
 
-        for page_num in range(1, max_pages + 1):
-            payload = {
-                "orderByTideName": True,
-                "pageNum": page_num,
-                "pageSize": page_size,
-                "seqno": [locator["seqno"]],
+        topic_bag_files, resolved_bucket = self._query_topic_bag_files(subtask)
+        if topic_bag_files:
+            return {
+                "bucket": resolved_bucket,
+                "topic_bag_files": topic_bag_files,
+                "task_id": str(subtask.get("taskId")),
+                "sub_seqno": canonical_sub_seqno,
+                "data_segment": str(subtask.get("tideName") or canonical_sub_seqno),
+                "dataset_name": str(subtask.get("tideName") or canonical_sub_seqno),
+                "add_slash_before_archive": False,
             }
-            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-            resp.raise_for_status()
-            data = resp.json()
-            items = data.get("list") or []
-            if page_num == 1 and not items:
-                raise RuntimeError(f"querySubTaskByType 返回空: seqno={locator['seqno']}")
-            if not items:
-                break
 
-            for item in items:
-                item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
-                if item_sub_seqno != target_sub_seqno:
-                    continue
-                transfer_path = self._pick_transfer_path(item)
-                if transfer_path:
-                    found_subtask = {
-                        "transfer_path": str(transfer_path),
-                        "data_segment": str(item.get("tideName") or locator["sub_seqno"]),
-                        "dataset_name": str(item.get("tideName") or locator["sub_seqno"]),
-                        "add_slash_before_archive": False,
-                    }
+        transfer_path = self._pick_transfer_path(subtask)
+        if transfer_path:
+            return {
+                "transfer_path": str(transfer_path),
+                "data_segment": str(subtask.get("tideName") or locator["sub_seqno"]),
+                "dataset_name": str(subtask.get("tideName") or locator["sub_seqno"]),
+                "add_slash_before_archive": False,
+            }
+
+        fallback_data_name = locator.get("data_name") or locator.get("sub_seqno")
+        return self._resolve_by_event_list(str(fallback_data_name), key="id")
+
+    def _query_online_visual_subseqno(self, platform: str, sub_seqno: str) -> str:
+        url = f"{self.base_url}/{platform}/v1/carjam/onlineVisualQuery"
+        headers = self._headers_for(platform)
+        resp = self.session.get(
+            url,
+            params={"subSeqno": sub_seqno},
+            headers=headers,
+            verify=self.verify_ssl,
+            timeout=self.timeout_sec,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        result = data.get("result") or {}
+        resolved_sub_seqno = result.get("subSeqno") or result.get("subSeqNo")
+        if not resolved_sub_seqno:
+            raise RuntimeError(f"onlineVisualQuery 未返回 result.subSeqno: subSeqno={sub_seqno}, data={data}")
+        return str(resolved_sub_seqno)
+
+    def _query_subtask_by_type(self, platform: str, sub_seqno: str, seqno: str | None = None) -> dict[str, Any]:
+        url = f"{self.base_url}/{platform}/v1/carjam/querySubTaskByType"
+        headers = self._headers_for(platform)
+        max_pages = 20
+        page_size = 20
+        target_sub_seqno = self._normalize_seqno(sub_seqno)
+        search_modes: list[dict[str, Any]] = []
+        if seqno:
+            search_modes.append({"seqno": [seqno], "_label": "with_seqno"})
+        search_modes.append({"_label": "subseq_only"})
+
+        for mode in search_modes:
+            first_page_empty = False
+            for page_num in range(1, max_pages + 1):
+                payload: dict[str, Any] = {
+                    "subSeqno": [sub_seqno],
+                    "pageNum": page_num,
+                    "pageSize": page_size,
+                }
+                if mode.get("seqno"):
+                    payload["seqno"] = mode["seqno"]
+                resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("list") or []
+                if page_num == 1 and not items:
+                    first_page_empty = True
                     break
-                found_subtask_without_path = True
-
-            if found_subtask:
-                return found_subtask
-            if len(items) < page_size:
+                for item in items:
+                    item_sub_seqno = self._normalize_seqno(item.get("subSeqNo") or item.get("subSeqno"))
+                    if item_sub_seqno == target_sub_seqno:
+                        return item
+                if len(items) < page_size:
+                    break
+            if not first_page_empty:
                 break
+        raise RuntimeError(f"querySubTaskByType 未命中 subSeqNo={sub_seqno}（已翻页检索）")
 
-        if found_subtask_without_path:
-            fallback_data_name = locator.get("data_name") or locator.get("sub_seqno")
+    def _query_topic_bag_files(self, subtask: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], str]:
+        task_id = str(subtask.get("taskId") or "").strip()
+        if not task_id:
+            return {}, self.default_bucket
+        for bucket, data_path in self._candidate_archive_data_paths(subtask):
+            files = self._query_menu_files(bucket=bucket, data_path=data_path, start_ts=subtask.get("startTimeStamp"))
+            if not files:
+                continue
+            topic_map: dict[str, dict[str, Any]] = {}
+            for topic in self.topics:
+                fname = f"{topic}.bag"
+                for item in files:
+                    if item.get("name") == fname:
+                        topic_map[topic] = item
+                        break
+            if topic_map:
+                return topic_map, bucket
+        return {}, self.default_bucket
+
+    def _candidate_archive_data_paths(self, subtask: dict[str, Any]) -> list[tuple[str, str]]:
+        task_id = str(subtask.get("taskId") or "").strip()
+        if not task_id:
+            return []
+        logfile_path = str(subtask.get("logfilePath") or "").strip()
+        if logfile_path.startswith("obs://"):
             try:
-                return self._resolve_by_event_list(str(fallback_data_name), key="id")
+                core = logfile_path[6:]
+                bucket, rest = core.split("/", 1)
+                path_parts = rest.split("/")
+                if len(path_parts) >= 5:
+                    base_path = "/".join(path_parts[:5])  # carjam_etoe/YYYY/MM/DD/<taskId>
+                    return [(bucket, f"/{bucket}/{base_path}/archive")]
             except Exception:
-                raise RuntimeError("命中 subtask，但缺少 carjamFilePath/replayFilePath，且 event/list 回退失败")
+                pass
+        return [(self.default_bucket, f"/{self.default_bucket}/carjam_etoe/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}/{task_id}/archive")]
 
-        raise RuntimeError(f"在 seqno={locator['seqno']} 下未找到 subSeqNo={locator['sub_seqno']}（已翻页检索）")
+    def _query_menu_files(self, bucket: str, data_path: str, start_ts: Any) -> list[dict[str, Any]]:
+        url = f"{self.base_url}/rivulet/v1/dataDownload/queryMenu"
+        headers = self._headers_for("rivulet")
+        payload = {
+            "queryStr": "",
+            "bucketName": bucket,
+            "dataPath": data_path,
+            "fileType": 2,
+            "uploadId": "",
+            "dataType": "",
+            "defectId": "",
+            "dataSetId": "",
+            "dataStartTime": int(start_ts or 0),
+            "pageNum": 1,
+            "pageSize": 50,
+        }
+        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+        resp.raise_for_status()
+        data = resp.json()
+        return self._collect_file_items(data)
+
+    def _collect_file_items(self, payload: Any) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+
+        def walk(node: Any):
+            if isinstance(node, dict):
+                if node.get("type") == "file" and node.get("name") and node.get("path"):
+                    items.append(node)
+                for value in node.values():
+                    walk(value)
+                return
+            if isinstance(node, list):
+                for child in node:
+                    walk(child)
+
+        walk(payload)
+        return items
 
     @staticmethod
     def _normalize_seqno(value: Any) -> str:
@@ -554,6 +681,28 @@ class DIBagDownloader:
         obs_id = data.get("result")
         if not obs_id:
             raise RuntimeError(f"getObsId 未返回 result: {data}")
+        return str(obs_id)
+
+    def _get_obs_id_by_file(self, bucket: str, file_item: dict[str, Any]) -> str:
+        url = f"{self.base_url}/rivulet/v1/dataDownload/getObsId"
+        headers = self._headers_for("rivulet")
+        payload = {
+            "files": [{
+                "name": file_item.get("name"),
+                "type": file_item.get("type") or "file",
+                "path": file_item.get("path"),
+                "size": int(file_item.get("size") or 0),
+            }],
+            "dataType": [],
+            "bucket": bucket,
+            "userName": self.default_rivulet_username,
+        }
+        resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+        resp.raise_for_status()
+        data = resp.json()
+        obs_id = data.get("result")
+        if not obs_id:
+            raise RuntimeError(f"getObsId(文件模式) 未返回 result: {data}")
         return str(obs_id)
 
     def _download_by_obs_id(self, obs_download_url: str, obs_id: str, save_dir: Path, save_name: str) -> dict[str, Any]:
