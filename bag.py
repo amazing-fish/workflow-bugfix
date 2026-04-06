@@ -598,25 +598,32 @@ class DIBagDownloader:
         errors: list[str] = []
 
         for candidate_path in self._candidate_obs_paths(bucket=bucket, remote_path=remote_path):
-            payload = {
-                "files": [{
-                    "name": Path(remote_path).name,
-                    "type": "file",
-                    "path": candidate_path,
-                    "size": 0,
-                }],
-                "dataType": [],
-                "bucket": bucket,
-            }
-            if dataset_name:
-                payload["datasetName"] = dataset_name
-            resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
-            resp.raise_for_status()
-            data = resp.json()
-            obs_id = data.get("result")
-            if obs_id:
-                return str(obs_id)
-            errors.append(f"path={candidate_path}, resp={data}")
+            payloads = [
+                {
+                    "files": [{"path": candidate_path}],
+                    "bucket": bucket,
+                },
+                {
+                    "files": [{
+                        "name": Path(remote_path).name,
+                        "type": "file",
+                        "path": candidate_path,
+                        "size": 0,
+                    }],
+                    "dataType": [],
+                    "bucket": bucket,
+                },
+            ]
+            for payload in payloads:
+                if dataset_name:
+                    payload["datasetName"] = dataset_name
+                resp = self.session.post(url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+                resp.raise_for_status()
+                data = resp.json()
+                obs_id = data.get("result")
+                if obs_id:
+                    return str(obs_id)
+                errors.append(f"path={candidate_path}, payload={list(payload.keys())}, resp={data}")
 
         raise RuntimeError(f"getObsId 未返回 result，已尝试多种 path: {' | '.join(errors)}")
 
@@ -637,14 +644,9 @@ class DIBagDownloader:
             variants.append(p)
 
         stripped = raw.lstrip("/")
+        add(raw)
         add(stripped)
         add("/" + stripped)
-
-        bucket_prefix = bucket.strip("/") + "/"
-        if stripped.startswith(bucket_prefix):
-            tail = stripped[len(bucket_prefix):]
-            add(tail)
-            add("/" + tail)
 
         return variants
 
