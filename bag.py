@@ -586,6 +586,68 @@ class DIBagDownloader:
             payload["datasetName"] = dataset_name
         return payload
 
+    @staticmethod
+    def _extract_archive_data_path(remote_path: str) -> str:
+        path_with_slash = remote_path if remote_path.startswith("/") else f"/{remote_path}"
+        idx = path_with_slash.rfind("/archive/")
+        if idx == -1:
+            return str(Path(path_with_slash).parent)
+        return path_with_slash[: idx + len("/archive")]
+
+    def _query_menu_file_meta(self, bucket: str, remote_path: str) -> dict[str, Any] | None:
+        query_menu_url = str(self.obs_probe_cfg.get("query_menu_url") or f"{self.base_url}/rivulet/v1/dataDownload/queryMenu")
+        query_menu_cfg = self.obs_probe_cfg.get("query_menu") or {}
+        if isinstance(query_menu_cfg, dict) and query_menu_cfg.get("enabled") is False:
+            return None
+
+        headers = self._headers_for("rivulet")
+        probe_headers = self.obs_probe_cfg.get("get_obs_id_headers") or {}
+        if isinstance(probe_headers, dict):
+            headers.update(probe_headers)
+
+        path_with_slash = remote_path if remote_path.startswith("/") else f"/{remote_path}"
+        bag_name = Path(path_with_slash).name
+        payload = {
+            "queryStr": "",
+            "bucketName": bucket,
+            "dataPath": self._extract_archive_data_path(path_with_slash),
+            "fileType": 2,
+            "uploadId": "",
+            "dataType": "",
+            "defectId": "",
+            "dataSetId": "",
+            "dataStartTime": int(query_menu_cfg.get("dataStartTime", 0)) if isinstance(query_menu_cfg, dict) else 0,
+            "pageNum": int(query_menu_cfg.get("pageNum", 1)) if isinstance(query_menu_cfg, dict) else 1,
+            "pageSize": int(query_menu_cfg.get("pageSize", 200)) if isinstance(query_menu_cfg, dict) else 200,
+        }
+
+        resp = self.session.post(query_menu_url, json=payload, headers=headers, verify=self.verify_ssl, timeout=self.timeout_sec)
+        resp.raise_for_status()
+        data = resp.json()
+        items = (
+            data.get("list")
+            or (data.get("data") or {}).get("list")
+            or (data.get("data") or {}).get("records")
+            or data.get("records")
+            or []
+        )
+        if not isinstance(items, list):
+            return None
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_path = str(item.get("path") or "").strip()
+            item_name = str(item.get("name") or "").strip()
+            if item_path == path_with_slash or item_name == bag_name:
+                return {
+                    "name": item_name or bag_name,
+                    "type": str(item.get("type") or "file"),
+                    "path": item_path or path_with_slash,
+                    "size": int(item.get("size") or 0),
+                }
+        return None
+
     def _get_obs_id(self, bucket: str, remote_path: str, dataset_name: str | None = None) -> str:
         url = f"{self.base_url}/rivulet/v1/dataDownload/getObsId"
         headers = self._headers_for("rivulet")
@@ -593,6 +655,14 @@ class DIBagDownloader:
         if isinstance(probe_headers, dict):
             headers.update(probe_headers)
         payload_primary = self._build_get_obs_id_payload(bucket=bucket, remote_path=remote_path, dataset_name=dataset_name)
+        try:
+            file_meta = self._query_menu_file_meta(bucket=bucket, remote_path=remote_path)
+            if file_meta:
+                payload_primary["files"] = [file_meta]
+                payload_primary.setdefault("dataType", [])
+                self._debug_print(f"[DEBUG] queryMenu 命中: name={file_meta['name']}, size={file_meta['size']}")
+        except Exception as e:
+            self._debug_print(f"[DEBUG] queryMenu 查询失败，继续走兜底 getObsId: {e}")
         payload_fallback_min = {"files": [{"path": remote_path}], "bucket": bucket}
         payload_fallback_slash = {"files": [{"path": remote_path if remote_path.startswith('/') else '/' + remote_path}], "bucket": bucket}
         payloads = [payload_primary, payload_fallback_min, payload_fallback_slash]

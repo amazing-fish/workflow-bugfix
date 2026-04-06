@@ -37,7 +37,14 @@
     "timeout_sec": 60,
     "output_dir": "outputs/obs_probe",
     "get_obs_id_url": "https://console.di.adscloud.yinwang.com/deepdata-entrypoint/rivulet/v1/dataDownload/getObsId",
+    "query_menu_url": "https://console.di.adscloud.yinwang.com/deepdata-entrypoint/rivulet/v1/dataDownload/queryMenu",
     "download_base_url": "https://console.di.adscloud.yinwang.com/obs-download",
+    "query_menu": {
+      "enabled": true,
+      "dataStartTime": 0,
+      "pageNum": 1,
+      "pageSize": 200
+    },
     "get_obs_id_headers": {
       "accept": "application/json, text/plain, */*",
       "accept-language": "zh-CN",

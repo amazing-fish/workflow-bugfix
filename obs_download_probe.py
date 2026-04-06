@@ -108,6 +108,76 @@ def _extract_obs_id_from_response(data) -> str | None:
     return walk(data)
 
 
+def _extract_archive_data_path(file_path: str) -> str:
+    path = file_path if file_path.startswith("/") else f"/{file_path}"
+    idx = path.rfind("/archive/")
+    if idx == -1:
+        return str(Path(path).parent)
+    return path[: idx + len("/archive")]
+
+
+def _query_menu_file_meta(session: requests.Session, probe_cfg: dict, headers: dict, verify_ssl: bool, timeout_sec: int, request_body: dict) -> dict | None:
+    query_cfg = probe_cfg.get("query_menu") or {}
+    if isinstance(query_cfg, dict) and query_cfg.get("enabled") is False:
+        return None
+    files = request_body.get("files") or []
+    if not files:
+        return None
+    first = files[0] or {}
+    raw_path = str(first.get("path") or "").strip()
+    if not raw_path:
+        return None
+    path_with_slash = raw_path if raw_path.startswith("/") else f"/{raw_path}"
+    bucket = str(request_body.get("bucket") or "").strip()
+    if not bucket:
+        return None
+
+    query_menu_url = str(probe_cfg.get("query_menu_url") or "").strip()
+    if not query_menu_url:
+        return None
+
+    payload = {
+        "queryStr": "",
+        "bucketName": bucket,
+        "dataPath": _extract_archive_data_path(path_with_slash),
+        "fileType": 2,
+        "uploadId": "",
+        "dataType": "",
+        "defectId": "",
+        "dataSetId": "",
+        "dataStartTime": int(query_cfg.get("dataStartTime", 0)) if isinstance(query_cfg, dict) else 0,
+        "pageNum": int(query_cfg.get("pageNum", 1)) if isinstance(query_cfg, dict) else 1,
+        "pageSize": int(query_cfg.get("pageSize", 200)) if isinstance(query_cfg, dict) else 200,
+    }
+    resp = session.post(query_menu_url, json=payload, headers=headers, verify=verify_ssl, timeout=timeout_sec)
+    resp.raise_for_status()
+    data = resp.json()
+    items = (
+        data.get("list")
+        or (data.get("data") or {}).get("list")
+        or (data.get("data") or {}).get("records")
+        or data.get("records")
+        or []
+    )
+    if not isinstance(items, list):
+        return None
+
+    bag_name = Path(path_with_slash).name
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_path = str(item.get("path") or "").strip()
+        item_name = str(item.get("name") or "").strip()
+        if item_path == path_with_slash or item_name == bag_name:
+            return {
+                "name": item_name or bag_name,
+                "type": str(item.get("type") or "file"),
+                "path": item_path or path_with_slash,
+                "size": int(item.get("size") or 0),
+            }
+    return None
+
+
 def run_probe(config_path: str | Path) -> dict:
     config_path = Path(config_path)
     cfg_all = json.loads(config_path.read_text(encoding="utf-8"))
@@ -134,6 +204,22 @@ def run_probe(config_path: str | Path) -> dict:
     download_base_url = str(probe_cfg["download_base_url"]).rstrip("/")
 
     session = requests.Session()
+    file_meta = None
+    try:
+        file_meta = _query_menu_file_meta(
+            session=session,
+            probe_cfg=probe_cfg,
+            headers=get_obs_id_headers,
+            verify_ssl=verify_ssl,
+            timeout_sec=timeout_sec,
+            request_body=body,
+        )
+    except Exception:
+        file_meta = None
+    if file_meta:
+        body = dict(body)
+        body["files"] = [file_meta]
+
     resp = session.post(
         get_obs_id_url,
         json=body,
