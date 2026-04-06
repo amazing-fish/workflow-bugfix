@@ -1,7 +1,7 @@
 # Anchor 文档
 
 ## 版本
-- 当前版本：`v0.3.4`
+- 当前版本：`v0.3.10`
 - 版本规则：`v主.次.修`
   - `feature`：新增能力，升级 `次`
   - `refactor`：重构与结构优化（不改外部能力），升级 `修`
@@ -22,6 +22,43 @@
    - 提供运行入口、实时状态刷新、日志交互能力（滚动/清空/置底）与分钟级时间戳。
 
 ## 修改日志（稳定）
+- `v0.3.10` `bugfix`（2026-04-06）
+  - 新增 `generate_f12_headers.py`：
+    - 支持将 3 份 F12 cURL（`downloadMenu/getObsId/download`）自动转换为 `menu/getobsid/download` 三份 headers JSON。
+    - 自动额外生成 `common_headers.json`（三接口公共头交集），便于快速复用。
+    - 过滤 `:pseudo headers`、`Host`、`Content-Length` 等易冲突头，降低重放失败率。
+
+- `v0.3.9` `bugfix`（2026-04-06）
+  - `bag_probe.py` 增加“成功请求头重放”能力：
+    - 新增 `--headers-file`（通用）及 `--menu-headers-file` / `--getobsid-headers-file` / `--download-headers-file`（分接口）。
+    - 新增 `--exact-headers`，可严格按 F12 请求头发起探测，不与配置头混合。
+    - 报告输入区增加 header keys 回显，便于核对脚本实际使用的请求头集合。
+
+- `v0.3.8` `bugfix`（2026-04-06）
+  - 基于维测结论修复 `bag.py` 的 `getObsId` 取值策略：
+    - 增加候选 payload 顺序：`browser_like_slash_bucket` → `minimal_slash_bucket` → `minimal_legacy`。
+    - 默认优先 `files[].path=/bucket/...`，并附带 `name/type/userName/dataType` 以兼容平台真实下载链路。
+    - 若某候选无 `result`，自动回退到下一个候选，降低“22字节 zip / 0字节 body”命中概率。
+
+- `v0.3.7` `bugfix`（2026-04-06）
+  - 修复 `bag_probe.py` 推荐策略偏差：
+    - `--file-size` 未传时不再生成 `browser_like_size` 分支，避免“同 payload 重复探测”噪音。
+    - `analysis` 推荐从“首个成功”改为“按质量排序”（`rosbag` 优先于 `zip_with_bag`）。
+    - `analysis` 增加 `recommended_get_obs_id_case` 与 `all_success_cases`，便于直接回灌主流程参数。
+
+- `v0.3.6` `bugfix`（2026-04-06）
+  - 增强 `bag_probe.py` 兼容维测能力：
+    - 增加 `getObsId` 路径形态矩阵探测（`obs://`、`/bucket/...`、`/no_bucket/...`、`bucket/...`）。
+    - 增加 `--file-size`，支持复刻浏览器 payload 的 `files[].size` 分支。
+    - 下载探测新增质量分型（`rosbag` / `zip_with_bag` / `empty_zip_22` / `empty_body`）。
+    - 报告新增 `analysis` 自动建议，直接给出推荐兼容 case。
+
+- `v0.3.5` `bugfix`（2026-04-06）
+  - 新增 bag 下载兼容维测脚本 `bag_probe.py`：
+    - 自动探测 `downloadMenu`、多种 `getObsId` 负载（minimal / browser_like / browser_like_with_size0）。
+    - 针对候选 `obs_id` 实测下载并输出内容判型（`#ROSBAG` / zip 内含 `.bag` / 22 字节空 zip）。
+    - 生成 `bag_probe_report.json`，用于快速定位“仅返回 zip 头”问题与选择兼容参数。
+
 - `v0.3.4` `bugfix`（2026-04-06）
   - 修复部分 bag 下载前置定位失败：
     - `querySubTaskByType` 增加分页检索（最多 20 页），避免仅查首页导致 `subSeqNo` 命中失败。
