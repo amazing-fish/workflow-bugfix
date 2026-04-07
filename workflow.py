@@ -581,7 +581,11 @@ class RowWorkflow:
         total_tasks = len(results)
         ok_tasks = sum(1 for r in results if r.get("status") in ("completed", "decoded", "decode_partial"))
         failed_tasks = total_tasks - ok_tasks
-        status = "completed" if total_tasks > 0 and failed_tasks == 0 else ("failed" if ok_tasks == 0 else "partial_failed")
+        no_task_reason = self._build_no_task_reason(row_meta) if total_tasks == 0 else None
+        if total_tasks == 0:
+            status = "timestamp_missing"
+        else:
+            status = "completed" if failed_tasks == 0 else ("failed" if ok_tasks == 0 else "partial_failed")
 
         # Row 级失败归因
         STAGE_PRIORITY = {"download": 0, "timestamp": 1, "decode": 2, "upload": 3, "inference": 4, "ai": 5, "runtime": 6, "cleanup": 7}
@@ -605,6 +609,11 @@ class RowWorkflow:
                     stage_reasons[rn] = stage_reasons.get(rn, 0) + 1
             if stage_reasons:
                 primary_failure_reason = max(stage_reasons, key=stage_reasons.get)
+        if total_tasks == 0:
+            primary_failure_stage = primary_failure_stage or "timestamp"
+            primary_failure_reason = primary_failure_reason or no_task_reason
+            if no_task_reason and no_task_reason not in failure_reasons:
+                failure_reasons.append(no_task_reason)
         row_analysis = self._build_row_analysis(row_meta, results)
 
         stage_stats = self._compute_stage_stats(results)
@@ -644,9 +653,20 @@ class RowWorkflow:
         row_meta["row_summary_path"] = str(row_dir / "row_summary.json")
         self._save_json(row_dir / "row_summary.json", row_summary)
         self._save_json(row_dir / "row_meta.json", row_meta)
-        print(f"[INFO] {row_analysis['count_line']}")
-        print(f"[INFO] {row_analysis['row_key']} 保留样本: {row_analysis['retained_line']}")
+        if total_tasks == 0:
+            print(f"[WARN] {row_meta.get('row_id')} 无可执行时间戳任务，已跳过 AI/解码汇总: {no_task_reason}")
+        else:
+            print(f"[INFO] {row_analysis['count_line']}")
+            print(f"[INFO] {row_analysis['row_key']} 保留样本: {row_analysis['retained_line']}")
         return row_summary
+
+    @staticmethod
+    def _build_no_task_reason(row_meta: dict[str, Any]) -> str:
+        collision = row_meta.get("collision") if isinstance(row_meta.get("collision"), dict) else {}
+        reason = collision.get("reason")
+        if reason:
+            return str(reason)
+        return "未检测到可执行时间戳"
 
     @staticmethod
     def _compute_stage_stats(results: list[dict[str, Any]]) -> dict[str, Any]:
