@@ -370,7 +370,7 @@ class RowWorkflow:
         if target_ts is None:
             task_meta["status"] = "ts_failed"
             task_meta["failure_stage"] = "timestamp"
-            task_meta["reason"] = "missing_target_ts"
+            task_meta["reason"] = "未检测到时间戳"
             task_meta["finished_at"] = datetime.now(timezone.utc).isoformat()
             task_meta["elapsed_sec"] = round(time.monotonic() - _t_start, 2)
             return task_meta
@@ -782,9 +782,13 @@ class RowWorkflow:
                         continue
                     sample_name = sample.get("sample_name")
                     result = sample.get("result")
+                    sample_ts = sample.get("sample_ts")
                     if not sample_name or not result:
                         continue
-                    retained_pairs.append(f"{task_id}/{sample_name}:{result}")
+                    if sample_ts is None:
+                        retained_pairs.append(f"{task_id}/{sample_name}:{result}")
+                    else:
+                        retained_pairs.append(f"{task_id}/{sample_name}:{result}@{float(sample_ts):.9f}")
 
         count_line = f"{row_key}: [no:{no_count},suspected:{suspected_count},yes:{yes_count}]"
         retained_line = f"[{','.join(retained_pairs)}]" if retained_pairs else "[]"
