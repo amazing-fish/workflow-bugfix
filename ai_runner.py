@@ -329,6 +329,7 @@ class WorkflowAIProcessor:
 
         sequence_results: list[dict[str, Any]] = []
         started = time.time()
+        sample_timestamp_map = self._build_sample_timestamp_map(manifest)
 
         if self.runtime_cfg.get("save_parameters_once", False):
             save_json(self.parameters, task_dir / "parameters.json")
@@ -429,6 +430,7 @@ class WorkflowAIProcessor:
                     sample_result = {
                         "sample_index": sample_index,
                         "sample_name": sample_name,
+                        "sample_ts": sample_timestamp_map.get(sample_name),
                         "status": "ok" if schema_report.get("ok") else "schema_invalid",
                         "failure_stage": None if schema_report.get("ok") else "inference",
                         "reason": None if schema_report.get("ok") else "schema_invalid",
@@ -456,6 +458,7 @@ class WorkflowAIProcessor:
                     sample_result = {
                         "sample_index": sample_index,
                         "sample_name": sample_name,
+                        "sample_ts": sample_timestamp_map.get(sample_name),
                         "status": "ai_failed",
                         "failure_stage": "upload" if "upload" in str(e).lower() else "inference",
                         "reason": "upload_failed" if "upload" in str(e).lower() else "inference_failed",
@@ -468,7 +471,7 @@ class WorkflowAIProcessor:
 
         aggregate = self._aggregate_sequence_results(sequence_results)
         retained_samples = self._build_retained_samples(sequence_results)
-        analysis = self._build_task_analysis(row_meta, task_meta, aggregate, retained_samples)
+        analysis = self._build_task_analysis(row_meta, task_meta, aggregate, retained_samples, sample_timestamp_map)
         result = {
             "status": "ok" if aggregate["failed_samples"] == 0 else ("failed" if aggregate.get("valid_samples", 0) == 0 else "partial_failed"),
             "elapsed_sec": round(time.time() - started, 3),
@@ -821,7 +824,7 @@ class WorkflowAIProcessor:
             "detailed_sequence": detailed_sequence,
         }
 
-    def _build_retained_samples(self, sequence_results: list[dict[str, Any]]) -> list[dict[str, str]]:
+    def _build_retained_samples(self, sequence_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         retained = []
         for item in sequence_results:
             label = to_analysis_label(item.get("collision_pred"))
@@ -830,10 +833,14 @@ class WorkflowAIProcessor:
             sample_name = item.get("sample_name")
             if not sample_name:
                 continue
-            retained.append({
+            retained_item: dict[str, Any] = {
                 "sample_name": str(sample_name),
                 "result": label,
-            })
+            }
+            sample_ts = item.get("sample_ts")
+            if sample_ts is not None:
+                retained_item["sample_ts"] = float(sample_ts)
+            retained.append(retained_item)
         return retained
 
     def _build_task_analysis(
@@ -841,7 +848,8 @@ class WorkflowAIProcessor:
         row_meta: dict[str, Any],
         task_meta: dict[str, Any],
         aggregate: dict[str, Any],
-        retained_samples: list[dict[str, str]],
+        retained_samples: list[dict[str, Any]],
+        sample_timestamp_map: dict[str, float],
     ) -> dict[str, Any]:
         row_id = str(row_meta.get("row_id") or "unknown_row")
         task_id = str(task_meta.get("task_id") or "unknown_task")
@@ -850,8 +858,16 @@ class WorkflowAIProcessor:
         suspected_count = int(aggregate.get("suspected_count", 0))
         yes_count = int(aggregate.get("yes_count", 0))
         count_line = f"{task_key}: [no:{no_count},suspected:{suspected_count},yes:{yes_count}]"
-        retained_pairs = [f"{item['sample_name']}:{item['result']}" for item in retained_samples]
+        retained_pairs = []
+        for item in retained_samples:
+            sample_ts = item.get("sample_ts")
+            if sample_ts is None:
+                retained_pairs.append(f"{item['sample_name']}:{item['result']}")
+            else:
+                retained_pairs.append(f"{item['sample_name']}:{item['result']}@{float(sample_ts):.9f}")
         retained_line = f"[{','.join(retained_pairs)}]" if retained_pairs else "[]"
+        ts_pairs = [f"{k}:{v:.9f}" for k, v in sorted(sample_timestamp_map.items(), key=lambda x: x[0])]
+        sample_timestamp_line = f"[{','.join(ts_pairs)}]" if ts_pairs else "[]"
         return {
             "task_key": task_key,
             "counts": {
@@ -861,7 +877,32 @@ class WorkflowAIProcessor:
             },
             "count_line": count_line,
             "retained_line": retained_line,
+            "sample_timestamps": sample_timestamp_map,
+            "sample_timestamp_line": sample_timestamp_line,
         }
+
+    @staticmethod
+    def _build_sample_timestamp_map(manifest: dict[str, Any]) -> dict[str, float]:
+        sample_ts_values: dict[str, list[float]] = {}
+        bags = manifest.get("bags") or {}
+        for bag_info in bags.values():
+            if not isinstance(bag_info, dict):
+                continue
+            for frame in bag_info.get("frames") or []:
+                if not isinstance(frame, dict):
+                    continue
+                sample_name = frame.get("sample")
+                actual_ts = frame.get("actual_ts")
+                if not sample_name or actual_ts is None:
+                    continue
+                sample_ts_values.setdefault(str(sample_name), []).append(float(actual_ts))
+
+        sample_ts_map: dict[str, float] = {}
+        for sample_name, values in sample_ts_values.items():
+            if not values:
+                continue
+            sample_ts_map[sample_name] = round(sum(values) / len(values), 9)
+        return sample_ts_map
 
     def _cleanup_no_samples(self, task_dir: Path, sequence_results: list[dict[str, Any]]) -> dict[str, Any] | None:
         cleanup_cfg = self.ai_cfg.get("cleanup", {})

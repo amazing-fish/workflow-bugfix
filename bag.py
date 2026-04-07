@@ -334,7 +334,7 @@ class DIBagDownloader:
             return {
                 "status": "empty_checker_text",
                 "failure_stage": "timestamp",
-                "reason": "ts_not_found",
+                "reason": "未检测到时间戳",
                 "checker_text": "",
                 "collision_ts": None,
                 "collision_ts_list": [],
@@ -347,7 +347,7 @@ class DIBagDownloader:
             return {
                 "status": "collision_ts_not_found",
                 "failure_stage": "timestamp",
-                "reason": "ts_not_found",
+                "reason": "未检测到时间戳",
                 "checker_text": checker_text,
                 "collision_ts": None,
                 "collision_ts_list": [],
