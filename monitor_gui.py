@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -52,13 +53,18 @@ def _is_failed(item: dict) -> bool:
     return (item.get("status") in EXPLICIT_FAILURE_STATUSES
             or item.get("failure_stage") is not None)
 
+def _natural_sort_key(value: str) -> tuple:
+    text = str(value or "")
+    parts = re.split(r"(\d+)", text)
+    return tuple(int(p) if p.isdigit() else p.lower() for p in parts)
+
 # -- Data collection -------------------------------------------------------
 
 def _iter_row_dirs(output_root: Path):
     """Yield (row_dir, row_meta) for valid row directories."""
     if not output_root.exists():
         return
-    for row_dir in sorted(output_root.iterdir()):
+    for row_dir in sorted(output_root.iterdir(), key=lambda p: _natural_sort_key(p.name)):
         if not row_dir.is_dir():
             continue
         row_meta = _read_json(row_dir / "row_meta.json")
@@ -81,7 +87,8 @@ def collect_realtime_stats(output_root: Path) -> dict:
             stages["download"]["fail"] += 1
             continue
         stages["download"]["ok"] += 1
-        for task_def in row_meta.get("tasks", []):
+        task_defs = sorted(row_meta.get("tasks", []), key=lambda t: _natural_sort_key(t.get("task_id", "")))
+        for task_def in task_defs:
             task_id = task_def.get("task_id")
             if not task_id:
                 continue
@@ -142,7 +149,8 @@ def collect_row_task_tree(output_root: Path) -> list[dict]:
         if row_meta.get("status") == "download_failed":
             rows.append(row_entry)
             continue
-        for task_def in row_meta.get("tasks", []):
+        task_defs = sorted(row_meta.get("tasks", []), key=lambda t: _natural_sort_key(t.get("task_id", "")))
+        for task_def in task_defs:
             task_id = task_def.get("task_id")
             if not task_id:
                 continue
@@ -169,7 +177,8 @@ def collect_failure_list(output_root: Path) -> list[dict]:
                 "reason": row_meta.get("reason", "download_error"),
                 "error": str(row_meta.get("error", ""))[:120]})
             continue
-        for task_def in row_meta.get("tasks", []):
+        task_defs = sorted(row_meta.get("tasks", []), key=lambda t: _natural_sort_key(t.get("task_id", "")))
+        for task_def in task_defs:
             task_id = task_def.get("task_id")
             if not task_id:
                 continue

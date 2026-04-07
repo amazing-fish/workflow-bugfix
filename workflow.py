@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import re
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -73,7 +74,7 @@ class RowWorkflow:
         if not self.output_root.exists():
             raise FileNotFoundError(f"输出目录不存在: {self.output_root}")
         row_dirs = [
-            p for p in sorted(self.output_root.iterdir())
+            p for p in sorted(self.output_root.iterdir(), key=lambda x: self._natural_sort_key(x.name))
             if p.is_dir() and (p / "row_meta.json").exists()
         ]
         print(f"[INFO] 待解码 row 数量: {len(row_dirs)}")
@@ -132,7 +133,7 @@ class RowWorkflow:
                     all_rows_summary.append(self._build_workflow_row_summary(summary, row_dir))
                     print(f"[INFO] {row_id} 全部 task 完成")
 
-        all_rows_summary.sort(key=lambda x: str(x.get("row_dir", "")))
+        all_rows_summary.sort(key=lambda x: self._natural_sort_key(str(x.get("row_dir", ""))))
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
         task_results = [r for row_state in row_states.values() for r in row_state["results"]]
@@ -166,7 +167,7 @@ class RowWorkflow:
             raise FileNotFoundError(f"输出目录不存在: {self.output_root}")
 
         row_dirs = [
-            p for p in sorted(self.output_root.iterdir())
+            p for p in sorted(self.output_root.iterdir(), key=lambda x: self._natural_sort_key(x.name))
             if p.is_dir() and (p / "row_meta.json").exists()
         ]
         print(f"[INFO] 待执行仅 AI 的 row 数量: {len(row_dirs)}")
@@ -230,7 +231,7 @@ class RowWorkflow:
                     row_summaries.append(self._build_workflow_row_summary(summary, row_dir))
                     print(f"[INFO] {row_id} AI-only 全部 task 完成")
 
-        row_summaries.sort(key=lambda x: str(x.get("row_dir", "")))
+        row_summaries.sort(key=lambda x: self._natural_sort_key(str(x.get("row_dir", ""))))
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
         task_results = [r for row_state in row_states.values() for r in row_state["results"]]
@@ -322,7 +323,7 @@ class RowWorkflow:
                     all_rows_summary.append(self._build_workflow_row_summary(summary, row_dir))
                     print(f"[INFO] {row_id} 全部 task 完成")
 
-        all_rows_summary.sort(key=lambda x: str(x.get("row_dir", "")))
+        all_rows_summary.sort(key=lambda x: self._natural_sort_key(str(x.get("row_dir", ""))))
         wf_finished = datetime.now(timezone.utc).isoformat()
         wf_elapsed = round(time.monotonic() - wf_t0, 2)
         task_results = [r for row_state in row_states.values() for r in row_state["results"]]
@@ -718,7 +719,7 @@ class RowWorkflow:
     @staticmethod
     def _build_row_task_summaries(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         summaries = []
-        for item in sorted(results, key=lambda x: str(x.get("task_id", ""))):
+        for item in sorted(results, key=lambda x: RowWorkflow._natural_sort_key(x.get("task_id", ""))):
             task_id = item.get("task_id")
             task_dir = item.get("task_dir")
             summaries.append({
@@ -762,7 +763,7 @@ class RowWorkflow:
         retained_pairs: list[str] = []
         task_lines: list[str] = []
 
-        for item in sorted(results, key=lambda x: str(x.get("task_id", ""))):
+        for item in sorted(results, key=lambda x: RowWorkflow._natural_sort_key(x.get("task_id", ""))):
             task_id = str(item.get("task_id") or "unknown_task")
             ai_summary = item.get("ai") if isinstance(item.get("ai"), dict) else {}
             aggregate = ai_summary.get("aggregate") if isinstance(ai_summary.get("aggregate"), dict) else {}
@@ -803,6 +804,12 @@ class RowWorkflow:
             "retained_line": retained_line,
             "task_count_lines": task_lines,
         }
+
+    @staticmethod
+    def _natural_sort_key(value: Any) -> tuple:
+        text = str(value or "")
+        parts = re.split(r"(\d+)", text)
+        return tuple(int(p) if p.isdigit() else p.lower() for p in parts)
 
     def _cleanup_bags_if_needed(self, row_dir: Path, row_meta: dict[str, Any], row_summary: dict[str, Any], results: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
         enabled = bool(self.cleanup_cfg.get("delete_bags_after_row", False))
