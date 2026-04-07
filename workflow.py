@@ -377,7 +377,7 @@ class RowWorkflow:
             return task_meta
 
         decoder_cfg = self._build_decoder_config_for_task(row_meta, float(target_ts), frames_out_dir)
-        print(f"[INFO] {row_meta['row_id']}/{task_id} 开始解码, target_ts={float(target_ts):.9f}")
+        print(f"[INFO] {row_meta['row_id']}/{task_id} 开始解码")
 
         try:
             decode_result = MultiFrameDecoder(decoder_cfg).run()
