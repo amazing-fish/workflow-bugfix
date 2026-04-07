@@ -218,7 +218,7 @@ class DIBagDownloader:
                 )
                 downloaded[topic] = dl_result["path"]
                 download_stats.append({"topic": topic, **dl_result})
-                print(f"[OK] {row_id} 下载完成 {topic} -> {dl_result['path']}")
+                self._debug_print(f"[OK] {row_id} 下载完成 {topic} -> {dl_result['path']}")
         except Exception as e:
             fail_stats = {}
             if isinstance(e, DownloadError):
@@ -270,7 +270,7 @@ class DIBagDownloader:
         with open(row_meta_path, "w", encoding="utf-8") as f:
             json.dump(row_meta, f, ensure_ascii=False, indent=2)
 
-        print(f"[INFO] {row_id} 就绪: timestamps={len(tasks)}, row_meta={row_meta_path}")
+        self._debug_print(f"[INFO] {row_id} 就绪: timestamps={len(tasks)}, row_meta={row_meta_path}")
         download_retries = sum(max(0, s.get("attempts", 1) - 1) for s in download_stats)
         return {
             "excel_row": excel_row,
