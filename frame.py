@@ -43,6 +43,7 @@ class MultiFrameDecoder:
 
         self.ffmpeg_path = decoder_cfg.get("ffmpeg_path", "ffmpeg")
         self.loglevel = decoder_cfg.get("loglevel", "error")
+        self.verbose = bool(config.get("debug", False) or decoder_cfg.get("verbose", False))
         self.image_ext = decoder_cfg.get("image_ext", "png").lstrip(".").lower()
         self.context_before_packets = int(decoder_cfg.get("context_before_packets", 12))
         self.context_after_packets = int(decoder_cfg.get("context_after_packets", 0))
@@ -160,13 +161,14 @@ class MultiFrameDecoder:
                 })
 
             ok_count = sum(1 for x in frames if x["status"] == "ok")
-            print(
-                f"[OK] {bag_path.stem}: "
-                f"target={self.target_ts:.9f}, "
-                f"center={center_actual_ts:.9f}, "
-                f"center_delta={center_actual_ts - self.target_ts:+.9f}, "
-                f"decoded={ok_count}/{len(frames)}"
-            )
+            if self.verbose:
+                print(
+                    f"[OK] {bag_path.stem}: "
+                    f"target={self.target_ts:.9f}, "
+                    f"center={center_actual_ts:.9f}, "
+                    f"center_delta={center_actual_ts - self.target_ts:+.9f}, "
+                    f"decoded={ok_count}/{len(frames)}"
+                )
 
             center_sample_name = f"sample{center_slot + 1:02d}"
             return {

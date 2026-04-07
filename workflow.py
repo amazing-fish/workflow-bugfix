@@ -397,6 +397,12 @@ class RowWorkflow:
                 "frames_root": decode_result["out_dir"],
                 "decode_summary": ds,
             })
+            print(
+                f"[INFO] {row_meta['row_id']}/{task_id} 解码完成: "
+                f"bags={ds.get('ok_bags', 0)}/{ds.get('expected_bags', ds.get('total_bags', 0))}, "
+                f"frames={ok_frames}/{expected_frames}, "
+                f"status={decode_status}"
+            )
             if decode_status == "decode_failed":
                 task_meta["failure_stage"] = "decode"
                 task_meta["reason"] = "zero_frames_decoded"
