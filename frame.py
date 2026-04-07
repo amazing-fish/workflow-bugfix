@@ -162,10 +162,8 @@ class MultiFrameDecoder:
             ok_count = sum(1 for x in frames if x["status"] == "ok")
             print(
                 f"[OK] {bag_path.stem}: "
-                f"target={self.target_ts:.9f}, "
-                f"center={center_actual_ts:.9f}, "
-                f"center_delta={center_actual_ts - self.target_ts:+.9f}, "
-                f"decoded={ok_count}/{len(frames)}"
+                f"decoded={ok_count}/{len(frames)}, "
+                f"center_delta={center_actual_ts - self.target_ts:+.3f}s"
             )
 
             center_sample_name = f"sample{center_slot + 1:02d}"
